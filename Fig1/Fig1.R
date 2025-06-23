@@ -10,44 +10,50 @@ usethis::use_air(vscode = TRUE)
 
 source(here("utils", "helper_functions.R"))
 
-# import ------------------------------------------------------------------
+# import and tidy ---------------------------------------------------------
 
 # 4.75 GB file of raw tracking/coordinate data
-double_agar <- read_rds(here("Fig1", "data", "double_agar.rds"))
+# NOTE: can skip this and read the summary in line 54 or uncomment and run to see raw tracks
+# zen4R::download_zenodo("10.5281/zenodo.15713500", path = here("Fig1", "data"), files = 'double_agar.rds')
 
-# tidy --------------------------------------------------------------------
+# double_agar <- read_rds(here(
+#   "Fig1",
+#   "data",
+#   "double_agar.rds"
+# ))
 
-# keep any track > 40 frames (8 FPS means ~5 seconds)
-frame_filter <- double_agar |>
-  group_by(file, date, video, experiment, particle) |>
-  tally() |>
-  filter(n > 40)
+# # keep any track > 40 frames (8 FPS means ~5 seconds)
+# frame_filter <- double_agar |>
+#   group_by(file, date, video, experiment, particle) |>
+#   tally() |>
+#   filter(n > 40)
 
-double_agar_filtered <- frame_filter |>
-  select(-n) |>
-  left_join(double_agar)
+# double_agar_filtered <- frame_filter |>
+#   select(-n) |>
+#   left_join(double_agar)
 
-# split all tracks into 5 sec chunks
-chunked_data <- double_agar_filtered |>
-  group_by(file, date, video, experiment, particle) |>
-  arrange(frame, .by_group = TRUE) |>
-  group_split() |>
-  map_dfr(~ split_trajectory(.x, frame_rate = 8, chunk_duration_sec = 5))
+# # split all tracks into 5 sec chunks
+# chunked_data <- double_agar_filtered |>
+#   group_by(file, date, video, experiment, particle) |>
+#   arrange(frame, .by_group = TRUE) |>
+#   group_split() |>
+#   map_dfr(~ split_trajectory(.x, frame_rate = 8, chunk_duration_sec = 5))
 
-nest_cols <- c("file", "date", "video", "experiment", "particle")
+# nest_cols <- c("file", "date", "video", "experiment", "particle")
 
-nested <- quick_nest(chunked_data, nest_cols)
+# nested <- quick_nest(chunked_data, nest_cols)
 
-# calculate features for each track (particle == track in trackpy terminology)
-track_summary <- calculate_track_features_parallel(
-  nested,
-  fps = 8,
-  chunk_size = 500
-)
+# # calculate features for each track (particle == track in trackpy terminology)
+# track_summary <- calculate_track_features_parallel(
+#   nested,
+#   fps = 8,
+#   chunk_size = 500
+# )
 
-write_rds(track_summary, here("Fig1", "data", "track_summary.rds"))
+# NOTE: start here
+zen4R::download_zenodo("10.5281/zenodo.15713500", path = here("Fig1", "data"), files = 'double_track_summary.rds')
 
-track_summary <- read_rds(here("Fig1", "data", "track_summary.rds"))
+track_summary <- read_rds(here("Fig1", "data", 'double_track_summary.rds'))
 
 shifted <- track_summary |>
   unnest(c(data)) |>
@@ -79,6 +85,7 @@ shifted <- track_summary |>
     net_displacement > 50,
     sd_x > 5 & sd_y > 5
   )
+
 
 #####################################################
 ################### PLOT HEATMAPS ###################
@@ -195,7 +202,7 @@ plot_heatmap <- function(df, fill_limits = c(0, 1)) {
     NULL
 }
 
-# Extract computed densities from a combined plot so separate plots use the same color scale
+# extract computed densities from a combined plot so separate plots use the same color scale
 combined_plot <- ggplot(shifted, aes(x, y)) +
   geom_hex(binwidth = c(350, 350), stat = "binhex") +
   facet_grid(scw_type ~ diffusion)
@@ -236,6 +243,7 @@ save_plot(
   base_width = 6,
   base_height = 3
 )
+
 
 ######################################################
 ################### PLOT DENSITIES ###################
@@ -376,10 +384,12 @@ save_plot(
   base_height = 3
 )
 
-######################################################
-################### CHUNK ANALYSIS ###################
-######################################################
 
+#########################################################
+################### SUBTRACK ANALYSIS ###################
+#########################################################
+
+# NOTE: can skip this and read the summary in line 416
 nest_cols <- c("file", "date", "video", "experiment", "particle", "subparticle")
 
 chunked_nested <- quick_nest(
@@ -395,9 +405,9 @@ subtrack_summary <- calculate_track_features_parallel(
   pixel_to_mm = 126.5
 )
 
-write_rds(subtrack_summary, here("Fig1", "data", "subtrack_summary.rds"))
+zen4R::download_zenodo("10.5281/zenodo.15713500", path = here("Fig1", "data"), files = 'double_subtrack_summary.rds')
 
-subtrack_summary <- read_rds(here("Fig1", "data", "subtrack_summary.rds")) |>
+subtrack_summary <- read_rds(here("Fig1", "data", 'double_subtrack_summary.rds')) |>
   mutate(
     diffusion = case_when(
       date %in% c("20240111", "20240328", "20240627", "20240718", '20240725') ~ "2 hr.",
@@ -699,228 +709,4 @@ save_plot(
   base_width = 10,
   base_height = 12,
   bg = 'white'
-)
-
-
-#######################################################
-################### BORDER CROSSERS ###################
-#######################################################
-
-apw_border <- min(shifted$x) + 3693
-scw_border <- min(shifted$x) + 7129 - 400
-
-border_crossers <- shifted |>
-  filter(diffusion == '2 hr.') |>
-  group_by(file, date, video, experiment, subparticle) |>
-  slice(1, n()) |>
-  select(file:particle, subparticle, x) |>
-  mutate(position = rep(c("start", "stop"))) |>
-  pivot_wider(names_from = position, values_from = x) |>
-  mutate(
-    category = case_when(
-      start > apw_border & stop < apw_border ~ "out_in_APW",
-      start < apw_border & stop > apw_border ~ "in_out_APW",
-      start > scw_border & stop < scw_border ~ "out_in_SCW",
-      start < scw_border & stop > scw_border ~ "in_out_SCW",
-      TRUE ~ NA_character_
-    )
-  ) |>
-  drop_na(category) |>
-  select(-start, -stop) |>
-  left_join(select(shifted, file:x, subparticle, frame))
-
-(border_crossers_plot <- border_crossers |>
-  ggplot(aes(x, y, color = frame / 8 / 60, group = subparticle)) +
-  geom_path() +
-  scale_color_viridis_c(option = "rocket") +
-  facet_wrap(vars(category), scale = 'free') +
-  theme_half_open() +
-  NULL)
-
-border_crossers_features <- border_crossers |>
-  rename(response = category) |>
-  group_by(file, date, video, experiment, particle, subparticle, response) |>
-  group_nest() |>
-  calculate_track_features_parallel(
-    fps = 8,
-    pixel_to_mm = 126.5,
-    chunk_size = 50
-  )
-
-border_crossers_features_summary <- border_crossers_features |>
-  pivot_longer(
-    cols = frame_start:curv_q90,
-    names_to = "feature",
-    values_to = "value"
-  ) |>
-  group_by(feature) |>
-  summarise(
-    mean = mean(value, na.rm = TRUE),
-    sd = sd(value, na.rm = TRUE),
-    n = n(),
-    .groups = 'drop'
-  )
-
-out_in_results <- map_dfr(
-  feature_cols,
-  ~ fit_model(
-    .x,
-    border_crossers_features |> filter(str_detect(response, "^out_in"))
-  )
-) |>
-  mutate(p_adj = p.adjust(p.value, method = "fdr"))
-
-in_out_results <- map_dfr(
-  feature_cols,
-  ~ fit_model(
-    .x,
-    border_crossers_features |> filter(str_detect(response, "^in_out"))
-  )
-) |>
-  mutate(p_adj = p.adjust(p.value, method = "fdr"))
-
-border_crossers_results <- bind_rows(out_in_results, in_out_results) |>
-  mutate(
-    sig = case_when(
-      p_adj < 0.0001 ~ "****",
-      p_adj < 0.001 ~ "***",
-      p_adj < 0.01 ~ "**",
-      p_adj < 0.05 ~ "*",
-      TRUE ~ ''
-    )
-  ) |>
-  left_join(border_crossers_features_summary |> select(feature, sd)) |>
-  mutate(
-    cohens_d = estimate / sd,
-    se_cohens_d = std.error / sd
-  ) |>
-  arrange(desc(cohens_d)) |>
-  drop_na(p_adj)
-
-feature_order <- border_crossers_results |>
-  drop_na(p_adj) |>
-  group_by(feature) |>
-  summarise(mean_cohens_d = mean(cohens_d, na.rm = TRUE), .groups = 'drop') |>
-  arrange(mean_cohens_d) |>
-  drop_na() |>
-  pull(feature)
-
-(border_crossers_cleveland <- border_crossers_results |>
-  drop_na(p_adj) |>
-  mutate(
-    point_shape = ifelse(p_adj <= 0.05, "sig", NA),
-    feature = factor(feature, levels = feature_order),
-  ) |>
-  ggplot() +
-  geom_rect(
-    data = tibble(
-      class = c('large', 'medium', 'small', 'medium', 'large'),
-      xmin = c(-0.7, -0.5, -0.2, 0.2, 0.5),
-      xmax = c(-0.5, -0.2, 0.2, 0.5, 0.7),
-      ymin = -Inf,
-      ymax = Inf
-    ),
-    aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = class),
-    show.legend = FALSE
-  ) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
-  geom_pointrange(aes(
-    x = cohens_d,
-    y = feature,
-    color = term,
-    xmin = cohens_d - se_cohens_d,
-    xmax = cohens_d + se_cohens_d,
-    shape = point_shape
-  )) +
-  scale_x_continuous(
-    limits = c(-0.7, 0.7),
-    expand = expansion(mult = c(0, 0)),
-    breaks = c(-0.5, -0.2, 0, 0.2, 0.5)
-  ) +
-  scale_y_discrete(labels = feature_labels) +
-  scale_color_manual(
-    values = c("darkorange", "purple"),
-    labels = c("In to out", "Out to in")
-  ) +
-  scale_fill_manual(values = c('grey90', 'grey80', 'grey70')) +
-  labs(
-    x = "Standardized effect size",
-    y = "Feature",
-    color = "Bording crossing direction"
-  ) +
-  guides(
-    shape = "none"
-  ) +
-  theme_half_open() +
-  theme(
-    axis.text.x = element_markdown(size = 8),
-    axis.text.y = element_markdown(size = 8),
-    axis.title = element_text(size = 9),
-    legend.title = element_text(size = 9),
-    legend.text = element_markdown(size = 8),
-    legend.position = 'bottom'
-  ) +
-  NULL)
-
-save_plot(
-  here("Fig1", "plots", "subplots", 'S2FigA.pdf'),
-  border_crossers_cleveland,
-  base_width = 6,
-  base_height = 5
-)
-
-lines <- tibble(
-  response = c("out_in_APW", "in_out_APW", "out_in_SCW", "in_out_SCW"),
-  x = c(apw_border, apw_border, scw_border, scw_border),
-)
-
-(border_crossers_plot <- border_crossers_features |>
-  unnest(data) |>
-  ggplot() +
-  geom_vline(data = lines, aes(xintercept = x), linetype = "dashed", color = "grey70") +
-  geom_path(aes(x, y, color = log10(heading_variance), group = subparticle), linewidth = 2, alpha = 0.75) +
-  scale_color_viridis_c(option = "mako") +
-  facet_wrap(
-    vars(response),
-    scale = 'free',
-    labeller = as_labeller(
-      c(
-        "out_in_APW" = "Out to in - Control",
-        "in_out_APW" = "In to out - Control",
-        "out_in_SCW" = "Out to in - SCW",
-        "in_out_SCW" = "In to out - SCW"
-      )
-    )
-  ) +
-  labs(x = ("X (px)"), y = "Y (px)", color = "Heading variance") +
-  theme_half_open() +
-  theme(
-    axis.text.x = element_markdown(size = 8),
-    axis.text.y = element_markdown(size = 8),
-    axis.title = element_text(size = 9),
-    strip.text = element_text(size = 9),
-    legend.title = element_text(size = 9),
-    legend.text = element_text(size = 8),
-    legend.position = 'right'
-  ) +
-  NULL)
-
-save_plot(
-  here("Fig1", "plots", "subplots", 'S2FigB.pdf'),
-  border_crossers_plot,
-  base_width = 6,
-  base_height = 5
-)
-
-save_plot(
-  here("Fig1", "plots", 'S2Fig.pdf'),
-  plot_grid(
-    border_crossers_plot,
-    border_crossers_cleveland,
-    nrow = 2,
-    labels = c("A", "B"),
-    rel_heights = c(0.75, 1)
-  ),
-  base_width = 6,
-  base_height = 8
 )

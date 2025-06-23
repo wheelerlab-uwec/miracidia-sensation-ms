@@ -1,307 +1,419 @@
 library(tidyverse)
-library(cowplot)
 library(here)
+library(tidymodels)
 library(ggtext)
+library(cowplot)
+
+usethis::use_air(vscode = TRUE)
 
 # functions ---------------------------------------------------------------
 
-source(here("../../invision/double_agar/helper_functions.R"))
+source(here("utils", "helper_functions.R"))
 
-# import ------------------------------------------------------------------
+# import and tidy ---------------------------------------------------------
 
-files <- tibble(file = list.files(here(), pattern = ".csv", recursive = TRUE))
+# 1.81 GB file of raw tracking/coordinate data
+# NOTE: can skip this and read the summary in line 53 or uncomment and run to see raw tracks
+# zen4R::download_zenodo("10.5281/zenodo.15713500", path = here("Fig3", "data"), files = 'skinny_tracks.rds')
 
-tracks <- files |>
-  separate(file, sep = "/", into = c("experiment", "video"), remove = FALSE) |>
-  mutate(
-    date = str_extract(video, "202[0-9]{5}"),
-    timepoint = case_when(
-      str_extract(video, "c[0-9]{2}") == "c01" ~ "0 min",
-      str_extract(video, "c[0-9]{2}") == "c02" ~ "30 min",
-      str_extract(video, "c[0-9]{2}") == "c03" ~ "60 min",
-      str_extract(video, "c[0-9]{2}") == "c04" ~ "90 min",
-      str_extract(video, "c[0-9]{2}") == "c05" ~ "120 min",
-    ),
-    side = case_when(
-      str_detect(experiment, "24568744") == TRUE ~ "left",
-      str_detect(experiment, "24568709") == TRUE ~ "right"
-    ),
-    data = map(file, ~ read_csv(here(.x)))
-  ) |>
-  unnest(cols = c(data)) |>
-  select(-mass, -size, -ecc, -signal, -raw_mass, -ep) |>
-  group_by(experiment, timepoint, particle) |>
-  arrange(frame, .by_group = TRUE)
+# skinny <- read_rds(here(
+#   "Fig3",
+#   "data",
+#   "skinny_tracks.rds"
+# ))
 
-frame_filter <- tracks |>
-  group_by(file, experiment, particle) |>
-  tally() |>
-  # keep any track > 5 seconds (5 x 15 fps = 75 frames)
-  filter(n > 75)
+# # keep any track >5 seconds (8 FPS)
+# frame_filter <- skinny |>
+#   group_by(date, experiment, well_row, well_col, particle) |>
+#   tally() |>
+#   filter(n > 40)
 
-filtered <- frame_filter |>
-  select(-n) |>
-  left_join(tracks) %>%
-  select(-video)
+# skinny_filtered <- frame_filter |>
+#   select(-n) |>
+#   left_join(skinny)
 
-chunked_data <- filtered |>
-  group_by(file, date, experiment, particle) |>
-  arrange(frame, .by_group = TRUE) |>
-  group_split() |>
-  map_dfr(~ split_trajectory(.x, frame_rate = 15, chunk_duration_sec = 5))
+# chunked_data <- skinny_filtered |>
+#   filter(!experiment %in% c("20241003a02rvh", "20241017a01rvh")) |>
+#   group_by(date, experiment, well_row, well_col, particle) |>
+#   arrange(frame, .by_group = TRUE) |>
+#   group_split() |>
+#   map_dfr(~ split_trajectory(.x, frame_rate = 8, chunk_duration_sec = 5))
 
-nest_cols <- c(
-  "date",
-  "file",
-  "experiment",
-  "timepoint",
-  "side",
-  "particle",
-  "subparticle"
-)
+# nest_cols <- c("date", "experiment", "well_row", "well_col", "particle")
+# nested <- quick_nest(chunked_data, nest_cols)
 
-nested <- quick_nest(chunked_data, nest_cols)
+# track_summary <- calculate_track_features_parallel(
+#   nested,
+#   fps = 8,
+#   chunk_size = 500,
+#   pixel_to_mm = 126.5
+# )
 
-subtrack_summary <- calculate_track_features_parallel(
-  nested,
-  fps = 15,
-  chunk_size = 1000
-)
+# NOTE: start here
+zen4R::download_zenodo("10.5281/zenodo.15713500", path = here("Fig3", "data"), files = 'skinny_track_summary.rds')
 
-# write_rds(subtrack_summary, here("subtrack_summary.rds"))
-subtrack_summary <- read_rds(here("Fig3", "data", "subtrack_summary.rds"))
+track_summary <- read_rds(here(
+  "Fig3",
+  "data",
+  "skinny_track_summary.rds"
+))
 
-shifted <- subtrack_summary |>
+# slight downward slant in the background images, so true slant is upward
+# the split PNGs have a downward slant which means well_row 2 is the bottom, 1 is the middle, and 0 is the top
+
+shifted <- track_summary |>
   unnest(c(data)) |>
-  group_by(date, experiment, particle, subparticle) |>
-  arrange(frame, .by_group = TRUE) |>
-  group_by(experiment) |>
   mutate(
-    x = case_when(
-      side == "left" ~ -x, # flip left video horizontally and place on negative x-axis
-      side == "right" ~ max(x) - x # flip right video horizontally but keep on positive side
-    )
+    arena = str_extract(experiment, "a[0-9]{2}")
   ) |>
-  mutate(experiment = str_sub(experiment, end = -10))
-
-split_wells <- shifted |>
+  # filter out non-moving particles (false-positives)
+  filter(
+    speed_mean > 632,
+    net_displacement > 50,
+    sd_x > 5 & sd_y > 5,
+    net_displacement / path_length > 0.175
+  ) |>
   mutate(
-    well_row = case_when(
-      well_row == 0 ~ "A",
-      well_row == 1 ~ "B",
-      well_row == 2 ~ "C",
-      well_row == 3 ~ "D",
-      well_row == 4 ~ "E",
-      well_row == 5 ~ "F",
-    ),
-    well_col = case_when(
-      well_col == 0 & side == "left" ~ "01",
-      well_col == 1 & side == "left" ~ "02",
-      well_col == 2 & side == "left" ~ "03",
-      well_col == 3 & side == "left" ~ "04",
-      well_col == 4 & side == "left" ~ "05",
-      well_col == 5 & side == "left" ~ "06",
-      well_col == 6 & side == "left" ~ "07",
-      well_col == 7 & side == "left" ~ "08",
-      well_col == 0 & side == "right" ~ "09",
-      well_col == 1 & side == "right" ~ "10",
-      well_col == 2 & side == "right" ~ "11",
-      well_col == 3 & side == "right" ~ "12",
-      well_col == 4 & side == "right" ~ "13"
-    ),
-    well = paste0(well_row, well_col),
     treatment = case_when(
-      well_col == "01" ~ "APW",
-      well_col == "02" ~ "5 mM MgCl<sub>2</sub>",
-      well_col == "03" ~ "10 mM MgCl<sub>2</sub>",
-      well_col == "04" ~ "0.2 ppm *B. glabrata* P12",
-      well_col == "05" ~ "0.4 ppm *B. glabrata* P12",
-      well_col == "06" ~ "0.2 ppm *B. kuhniana* P12",
-      well_col == "07" ~ "0.4 ppm *B. kuhniana* P12",
-      well_col == "08" ~ "0.2 ppm *B. sudanica* P12",
-      well_col == "09" ~ "0.4 ppm *B. sudanica* P12",
-      well_col == "10" ~ "0.2 ppm *B. straminea* P12",
-      well_col == "11" ~ "0.4 ppm *B. straminea* P12",
-      well_col == "12" ~ "1X lSCW",
-      well_col == "13" ~ "2X lSCW",
+      arena == "a01" & well_row == 2 ~ "APW1",
+      arena == "a02" & well_row == 2 ~ "APW2",
+      arena == "a01" & well_row == 1 ~ "Bku",
+      arena == "a01" & well_row == 0 ~ "Bga",
+      arena == "a02" & well_row == 1 ~ "Bsu",
+      arena == "a02" & well_row == 0 ~ "Bst",
+    )
+  )
+
+###################################################
+################### PLOT TRACKS ###################
+###################################################
+
+(tracks1 <- shifted |>
+  filter(treatment %in% c('APW1', 'APW2', 'Bga')) |>
+  mutate(
+    treatment = case_when(
+      str_detect(treatment, "APW") ~ "Control",
+      treatment == "Bga" ~ "*B. glabrata*"
     ),
     treatment = factor(
       treatment,
       levels = c(
-        "APW",
-        "5 mM MgCl<sub>2</sub>",
-        "10 mM MgCl<sub>2</sub>",
-        "1X lSCW",
-        "2X lSCW",
-        "0.2 ppm *B. glabrata* P12",
-        "0.4 ppm *B. glabrata* P12",
-        "0.2 ppm *B. kuhniana* P12",
-        "0.4 ppm *B. kuhniana* P12",
-        "0.2 ppm *B. sudanica* P12",
-        "0.4 ppm *B. sudanica* P12",
-        "0.2 ppm *B. straminea* P12",
-        "0.4 ppm *B. straminea* P12"
+        "Control",
+        "*B. glabrata*"
       )
     )
-  )
-
-track_prep <- split_wells %>%
-  filter(
-    timepoint %in% c("30 min", "60 min"),
-    well_row != "A",
-  ) %>%
-  mutate(timepoint = as.numeric(str_remove(timepoint, ' min'))) %>%
-  # move over a bit
-  mutate(
-    x = case_when(
-      side == 'right' ~ x - 175,
-      TRUE ~ x
-    ),
-    y = case_when(
-      side == 'right' ~ y + 115,
-      TRUE ~ y
-    )
-  )
-
-ex_plot <- track_prep |>
-  filter(
-    well %in% c("B01", "B02", "B03"),
-    date == '20250410',
-    timepoint == 30
   ) |>
-  ggplot() +
+  ggplot(aes(x = x, y = y, color = frame / 8 / 60)) +
   geom_path(
-    aes(
-      x = x,
-      y = y,
-      group = interaction(well, particle),
-      color = frame / 15 / 60
-    ),
+    aes(group = interaction(experiment, subparticle)),
     linewidth = 0.25
   ) +
-  facet_wrap(vars(timepoint), nrow = 2) +
-  scale_color_viridis_c(
-    option = "mako",
-    guide = guide_colourbar(barheight = 3, barwidth = 0.5)
-  ) +
+  geom_point(size = 0.5) +
+  facet_wrap(facets = vars(treatment), ncol = 2, scales = 'free_y') +
+  scale_color_viridis_c(option = 'mako') +
   scale_x_continuous(
     breaks = seq(min(shifted$x), max(shifted$x), length.out = 5),
     expand = c(0, 0),
     labels = c("0", "20.25", "40.5", "60.75", "81")
   ) +
   scale_y_continuous(
-    breaks = seq(min(shifted$y), max(shifted$y), length.out = 5),
+    breaks = seq(min(shifted$y), max(shifted$y), length.out = 3),
     expand = c(0, 0),
-    labels = c("", "6.75", "13.5", "20.25", "27")
+    labels = c("", "", "")
   ) +
-  coord_equal() +
-  labs(x = "X position (mm)", y = "Y position (mm)", color = "Minute") +
-  theme_void() +
+  labs(color = "Time\n(minutes)", x = ("X (mm)"), y = ("Y")) +
+  theme_minimal() +
   theme(
-    # aspect.ratio = 1,
-    legend.position = "right",
-    legend.title = element_text(size = 9),
     legend.text = element_text(size = 8),
-    # legend.text = element_text(angle = 45, hjust = 1),
-    strip.text = element_blank()
-  )
-ex_plot
+    legend.title = element_text(size = 9),
+    strip.text.x = element_blank(),
+    axis.text.x = element_markdown(size = 8),
+    axis.text.y = element_markdown(size = 8),
+    axis.title = element_text(size = 9),
+    strip.background = element_blank()
+  ) +
+  NULL)
 
-# subtrack analysis ----------------------------------------------------
+save_plot(
+  here("Fig3", "plots", "subplots", "Fig3B-bottom.pdf"),
+  tracks1,
+  base_width = 7.5,
+  base_height = 3.5,
+  device = cairo_pdf
+)
 
-source(here("Fig3", "model_utils.R"))
+(tracks2 <- shifted |>
+  filter(treatment %in% c('Bku', 'Bsu', 'Bst')) |>
+  mutate(
+    treatment = case_when(
+      treatment == "Bku" ~ "*B. kuhniana*",
+      treatment == "Bsu" ~ "*B. sudanica/<br>B. pfeifferi*",
+      treatment == "Bst" ~ "*B. straminea*",
+    ),
+    treatment = factor(
+      treatment,
+      levels = c(
+        "*B. sudanica/<br>B. pfeifferi*",
+        "*B. straminea*",
+        "*B. kuhniana*"
+      )
+    )
+  ) |>
+  ggplot(aes(x = x, y = y, color = frame / 8 / 60)) +
+  geom_path(
+    aes(group = interaction(experiment, subparticle)),
+    linewidth = 0.25
+  ) +
+  geom_point(size = 0.5) +
+  facet_wrap(facets = vars(treatment), ncol = 3, scales = 'free_y') +
+  scale_color_viridis_c(option = 'mako') +
+  scale_x_continuous(
+    breaks = seq(min(shifted$x), max(shifted$x), length.out = 5),
+    expand = c(0, 0),
+    labels = c("0", "20.25", "40.5", "60.75", "81")
+  ) +
+  scale_y_continuous(
+    breaks = seq(min(shifted$y), max(shifted$y), length.out = 3),
+    expand = c(0, 0),
+    labels = c("", "", "")
+  ) +
+  labs(color = "Time\n(minutes)", x = ("X (mm)"), y = ("Y")) +
+  theme_minimal() +
+  theme(
+    legend.position = "empty",
+    strip.text.x = element_blank(),
+    axis.text.x = element_markdown(size = 8),
+    axis.text.y = element_markdown(size = 8),
+    axis.title = element_text(size = 9),
+    strip.background = element_blank()
+  ) +
+  NULL)
 
-analysis <- split_wells |>
-  select(-x, -y, -frame) |>
-  distinct() |>
-  filter(
-    sd_x & sd_y > 1
-  )
+save_plot(
+  here("Fig3", "plots", "subplots", "Fig3D-bottom.pdf"),
+  tracks2,
+  base_width = 7.5,
+  base_height = 3.5,
+  device = cairo_pdf
+)
 
-feature_cols <- analysis %>%
+
+########################################################
+################### PLOT STACKED BAR ###################
+########################################################
+
+bins <- shifted |>
   ungroup() |>
-  select(-(file:sd_y)) %>%
+  mutate(
+    frame_bin = case_when(
+      frame < 4800 * 2 ~ "0-20 min.",
+      frame >= 4800 * 2 & frame < 4800 * 4 ~ "20-40 min.",
+      frame >= 4800 * 4 ~ "40-60 min.",
+    )
+  ) |>
+  # merge the APW treatment for plotting purposes
+  mutate(
+    treatment = case_when(
+      str_detect(treatment, "APW") ~ "Control",
+      treatment == "Bku" ~ "*B. kuhniana*",
+      treatment == "Bga" ~ "*B. glabrata*",
+      treatment == "Bsu" ~ "*B. sudanica/<br>B. pfeifferi*",
+      treatment == "Bst" ~ "*B. straminea*",
+    ),
+    treatment = factor(
+      treatment,
+      levels = c(
+        'Control',
+        "*B. glabrata*",
+        "*B. sudanica/<br>B. pfeifferi*",
+        "*B. straminea*",
+        "*B. kuhniana*"
+      )
+    )
+  ) |>
+  mutate(
+    x_bin = case_when(
+      x < -3000 ~ 'Start',
+      x > -3000 & x < 3000 ~ "Middle",
+      x > 3000 ~ 'Cue'
+    ),
+    x_bin = factor(
+      x_bin,
+      levels = c('Start', 'Middle', 'Cue')
+    ),
+    frame_bin = factor(
+      frame_bin,
+      levels = c('0-20 min.', '20-40 min.', "40-60 min.")
+    )
+  ) |>
+  group_by(treatment, frame_bin, x_bin) %>%
+  summarise(
+    n = n()
+  ) %>%
+  mutate(pct = n / sum(n) * 100)
+
+plot_stacked_bar <- function(df, cols = 2) {
+  ggplot(df) +
+    geom_col(aes(x = frame_bin, y = pct, fill = forcats::fct_rev(x_bin))) +
+    coord_flip() +
+    facet_wrap(~treatment, ncol = cols) +
+    labs(x = 'Time bins', y = "Percent tracks in region", fill = "Region") +
+    scale_fill_manual(values = rev(c("#FBDCE2", "#DA93C9", "#AE55BC"))) +
+    scale_x_discrete(limits = rev) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+    theme_half_open() +
+    theme(
+      legend.position = "bottom",
+      legend.text = element_text(size = 8),
+      legend.title = element_text(size = 9),
+      strip.text.x = element_markdown(size = 8),
+      axis.text.x = element_markdown(size = 8, hjust = 1),
+      axis.text.y = element_markdown(size = 8),
+      axis.title = element_text(size = 9),
+      strip.background = element_blank()
+    )
+}
+
+(stacked_bar_1 <- bins %>%
+  filter(treatment %in% c('Control', "*B. glabrata*")) |>
+  plot_stacked_bar())
+
+save_plot(
+  here("Fig3", "plots", "subplots", "Fig3B-top.pdf"),
+  stacked_bar_1,
+  base_width = 7.5,
+  base_height = 3.5,
+  device = cairo_pdf
+)
+
+(stacked_bar_2 <- bins %>%
+  filter(!treatment %in% c('Control', "*B. glabrata*")) |>
+  plot_stacked_bar(cols = 3))
+
+save_plot(
+  here("Fig3", "plots", "subplots", "Fig3D-top.pdf"),
+  stacked_bar_2,
+  base_width = 7.5,
+  base_height = 3.5,
+  device = cairo_pdf
+)
+
+######################################################
+################### CHUNK ANALYSIS ###################
+######################################################
+
+# nest_cols <- c("date", "experiment", "well_row", "well_col", "subparticle")
+# nested <- quick_nest(chunked_data, nest_cols)
+
+# subtrack_summary <- calculate_track_features_parallel(
+#   nested,
+#   fps = 8,
+#   chunk_size = 500,
+#   pixel_to_mm = 126.5
+# )
+
+zen4R::download_zenodo("10.5281/zenodo.15713500", path = here("Fig3", "data"), files = 'skinny_subtrack_summary.rds')
+
+subtrack_summary <- read_rds(here(
+  "Fig3",
+  "data",
+  "skinny_subtrack_summary.rds"
+))
+
+subtrack_summary_region <- subtrack_summary |>
+  mutate(
+    response = ifelse(mean_x > 0, 'cue', 'control'),
+    arena = str_extract(experiment, "a[0-9]{2}"),
+    treatment = ifelse(
+      well_row == 2,
+      "Control",
+      ifelse(
+        arena == "a01" & well_row == 1,
+        "Bku",
+        ifelse(
+          arena == "a01" & well_row == 0,
+          "Bgl",
+          ifelse(
+            arena == "a02" & well_row == 1,
+            "Bsu",
+            ifelse(arena == "a02" & well_row == 0, "Bst", NA_character_)
+          )
+        )
+      )
+    ),
+    .before = data,
+  )
+
+feature_cols <- subtrack_summary_region %>%
+  ungroup() |>
+  select(-(date:sd_y)) %>%
   select_if(is.numeric) %>%
   names()
 
-t0_results <- map_dfr(
-  feature_cols,
-  ~ fit_model(
-    .x,
-    analysis |> filter(timepoint == "0 min"),
-    control_level = "APW"
-  )
-) |>
-  mutate(p_adj = p.adjust(p.value, method = "holm"))
+source(here("utils", "model_utils.R"))
 
-t30_results <- map_dfr(
+bgl_results <- map_dfr(
   feature_cols,
-  ~ fit_model(
-    .x,
-    analysis |> filter(timepoint == "30 min"),
-    control_level = "APW"
-  )
+  ~ fit_model(.x, subtrack_summary_region |> filter(treatment == 'Bgl'))
 ) |>
-  mutate(p_adj = p.adjust(p.value, method = "holm"))
+  mutate(treatment = 'Bgl', .before = term)
 
-t60_results <- map_dfr(
+bsu_results <- map_dfr(
   feature_cols,
-  ~ fit_model(
-    .x,
-    analysis |> filter(timepoint == "60 min"),
-    control_level = "APW"
-  )
+  ~ fit_model(.x, subtrack_summary_region |> filter(treatment == 'Bsu'))
 ) |>
-  mutate(p_adj = p.adjust(p.value, method = "holm"))
+  mutate(treatment = 'Bsu', .before = term)
 
-t90_results <- map_dfr(
+bku_results <- map_dfr(
   feature_cols,
-  ~ fit_model(
-    .x,
-    analysis |> filter(timepoint == "90 min"),
-    control_level = "APW"
-  )
+  ~ fit_model(.x, subtrack_summary_region |> filter(treatment == 'Bku'))
 ) |>
-  mutate(p_adj = p.adjust(p.value, method = "holm"))
+  mutate(treatment = 'Bku', .before = term)
 
-feature_summary <- analysis |>
+bst_results <- map_dfr(
+  feature_cols,
+  ~ fit_model(.x, subtrack_summary_region |> filter(treatment == 'Bst'))
+) |>
+  mutate(treatment = 'Bst', .before = term)
+
+feature_track_summary <- subtrack_summary_region |>
   pivot_longer(
     cols = frame_start:curv_q90,
     names_to = "feature",
     values_to = "value"
   ) |>
-  group_by(timepoint, feature) |>
+  group_by(feature) |>
   summarise(
     mean = mean(value, na.rm = TRUE),
     sd = sd(value, na.rm = TRUE),
     n = n(),
     .groups = 'drop'
-  ) |>
-  drop_na()
+  )
 
-results <- bind_rows(
-  t0_results |> mutate(timepoint = "0 min"),
-  t30_results |> mutate(timepoint = "30 min"),
-  t60_results |> mutate(timepoint = "60 min"),
-  t90_results |> mutate(timepoint = "90 min"),
-) |>
+results <- bind_rows(bgl_results, bsu_results, bku_results, bst_results) |>
   mutate(
+    p_adj = p.adjust(p.value, method = "fdr"),
     sig = case_when(
       p_adj < 0.0001 ~ "****",
       p_adj < 0.001 ~ "***",
       p_adj < 0.01 ~ "**",
       p_adj < 0.05 ~ "*",
-      p_adj > 0.05 ~ ""
-    ),
-    treatment = str_remove(term, "treatment"),
+      TRUE ~ ''
+    )
   ) |>
-  select(-term) |>
-  left_join(feature_summary |> select(timepoint, feature, sd)) |>
+  left_join(feature_track_summary |> select(feature, sd)) |>
   mutate(
     cohens_d = estimate / sd,
     se_cohens_d = std.error / sd
   ) |>
   arrange(desc(cohens_d))
+
+feature_order <- results |>
+  filter(str_detect(term, "cue")) |>
+  group_by(feature) |>
+  summarise(mean_cohens_d = mean(cohens_d, na.rm = TRUE), .groups = 'drop') |>
+  arrange(mean_cohens_d) |>
+  pull(feature)
 
 feature_labels <- c(
   "directional_persistence" = "Directional persistence",
@@ -349,121 +461,81 @@ feature_labels <- c(
   "straightness" = "Straightness"
 )
 
-(feature_plot <- results |>
+(results_plot <- results |>
   drop_na() |>
-  filter(timepoint %in% c("30 min", "60 min")) |>
   mutate(
-    treatment = factor(
-      treatment,
-      levels = c(
-        "5 mM MgCl<sub>2</sub>",
-        "10 mM MgCl<sub>2</sub>",
-        "1X lSCW",
-        "2X lSCW",
-        "0.2 ppm *B. glabrata* P12",
-        "0.4 ppm *B. glabrata* P12",
-        "0.2 ppm *B. kuhniana* P12",
-        "0.4 ppm *B. kuhniana* P12",
-        "0.2 ppm *B. sudanica* P12",
-        "0.4 ppm *B. sudanica* P12",
-        "0.2 ppm *B. straminea* P12",
-        "0.4 ppm *B. straminea* P12"
-      )
-    )
+    feature = factor(feature, levels = names(feature_labels)),
+    point_shape = ifelse(p_adj < 0.05, 16, NA)
   ) |>
   ggplot() +
-  geom_tile(aes(x = treatment, y = feature, fill = cohens_d)) +
-  geom_text(
-    aes(x = treatment, y = feature, label = sig),
-    color = "grey10",
-    size = 1.5,
-    vjust = 0.5
+  geom_rect(
+    data = tibble(
+      class = c('large', 'medium', 'small', 'medium', 'large'),
+      xmin = c(-0.88, -0.5, -0.2, 0.2, 0.5),
+      xmax = c(-0.5, -0.2, 0.2, 0.5, 0.6),
+      ymin = -Inf,
+      ymax = Inf
+    ),
+    aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = class),
+    show.legend = FALSE
   ) +
-  facet_wrap(vars(timepoint), nrow = 1) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  geom_pointrange(aes(
+    x = cohens_d,
+    y = feature,
+    color = treatment,
+    shape = point_shape,
+    xmin = cohens_d - se_cohens_d,
+    xmax = cohens_d + se_cohens_d
+  )) +
+  scale_x_continuous(
+    expand = expansion(mult = 0),
+    breaks = c(-0.8, -0.5, -0.2, 0, 0.2, 0.5)
+  ) +
   scale_y_discrete(labels = feature_labels) +
-  scale_fill_distiller(
-    limits = c(-1, 1),
-    palette = "BrBG"
+  scale_color_manual(
+    labels = c(
+      "*B. glabrata*",
+      "*B. kuhniana*",
+      "*B. straminea*",
+      "*B. sudanica/B. pfeifferi*"
+    ),
+    values = c("#EF476F", "#FFD166", "#06D6A0", "#118AB2")
   ) +
-  labs(fill = "Standardized<br>effect size", y = "Feature", x = "Treatment") +
+  scale_shape_identity() +
+  scale_fill_manual(values = c('grey90', 'grey80', 'grey70')) +
+  labs(x = "Standardized effect size", y = "Feature", color = "Cue source") +
   theme_half_open() +
   theme(
-    axis.text.x = element_markdown(size = 8, angle = 45, hjust = 1),
-    axis.text.y = element_markdown(size = 8),
+    axis.text.x = element_markdown(size = 8),
+    axis.text.y = element_markdown(size = 6),
     axis.title = element_text(size = 9),
-    strip.text = element_markdown(size = 9),
-    legend.title = element_markdown(size = 9),
-    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 9),
+    legend.text = element_markdown(size = 8),
     legend.position = 'bottom'
   ) +
   NULL)
 
-supp_features <- results |>
-  drop_na() |>
-  filter(timepoint %in% c("0 min", "90 min")) |>
-  mutate(
-    treatment = factor(
-      treatment,
-      levels = c(
-        "5 mM MgCl<sub>2</sub>",
-        "10 mM MgCl<sub>2</sub>",
-        "1X lSCW",
-        "2X lSCW",
-        "0.2 ppm *B. glabrata* P12",
-        "0.4 ppm *B. glabrata* P12",
-        "0.2 ppm *B. kuhniana* P12",
-        "0.4 ppm *B. kuhniana* P12",
-        "0.2 ppm *B. sudanica* P12",
-        "0.4 ppm *B. sudanica* P12",
-        "0.2 ppm *B. straminea* P12",
-        "0.4 ppm *B. straminea* P12"
-      )
-    )
-  ) |>
-  ggplot() +
-  geom_tile(aes(x = treatment, y = feature, fill = cohens_d)) +
-  geom_text(
-    aes(x = treatment, y = feature, label = sig),
-    color = "grey10",
-    size = 1.5,
-    vjust = 0.5
-  ) +
-  facet_wrap(vars(timepoint), nrow = 1) +
-  scale_y_discrete(labels = feature_labels) +
-  scale_fill_distiller(
-    limits = c(-1, 1),
-    palette = "BrBG"
-  ) +
-  labs(fill = "Standardized<br>effect size", y = "Feature", x = "Treatment") +
-  theme_half_open() +
-  theme(
-    axis.text.x = element_markdown(size = 8, angle = 45, hjust = 1),
-    axis.text.y = element_markdown(size = 8),
-    axis.title = element_text(size = 9),
-    strip.text = element_markdown(size = 9),
-    legend.title = element_markdown(size = 9),
-    legend.text = element_text(size = 8),
-    legend.position = 'bottom'
-  ) +
-  NULL
-
-
 save_plot(
-  here("Fig3", "plots", "S3_Fig.pdf"),
-  supp_features,
-  base_width = 6,
-  base_height = 6
+  here("Fig3", "plots", "subplots", "Fig3E.pdf"),
+  results_plot,
+  base_width = 10,
+  base_height = 6,
+  device = cairo_pdf
 )
 
-save_plot(
-  here("Fig3", "plots", "S3_Fig.png"),
-  supp_features,
-  base_width = 7.5,
-  base_height = 7.5,
-  bg = 'white'
-)
 
-# final plotting
+######################################################
+################### FINAL PLOTTING ###################
+######################################################
+
+msa <- ggdraw() +
+  draw_image(magick::image_read_pdf(here(
+    "Fig3",
+    "plots",
+    "subplots",
+    "Fig3C.pdf"
+  )))
 
 model <- ggdraw() +
   draw_image(magick::image_read_pdf(here(
@@ -473,29 +545,65 @@ model <- ggdraw() +
     "Fig3A.pdf"
   )))
 
-top <- plot_grid(model, ex_plot, ncol = 2, labels = c('A', 'B'),
-rel_widths = c(1.25, 1.5))
+library(patchwork)
 
-merge <- plot_grid(
+(top_right <- (stacked_bar_1 + theme(legend.position = 'right')) /
+  (tracks1 +
+    theme_void() +
+    theme(
+      axis.title.y = element_blank(),
+      strip.text.x = element_blank(),
+      legend.title = element_text(size = 9),
+      legend.text = element_text(size = 8),
+    )) +
+  plot_layout(heights = c(2, 1)))
+
+top_left <- plot_grid(model, msa, nrow = 2, labels = c("A", "C"), rel_heights = c(1, 1.5))
+
+top <- plot_grid(
+  top_left,
+  top_right,
+  nrow = 1,
+  labels = c("A", "B")
+)
+
+middleish <- (stacked_bar_2 + theme(legend.position = 'empty')) /
+  (tracks2 +
+    theme_void() +
+    theme(axis.title.y = element_blank(), legend.position = 'empty', strip.text.x = element_blank())) +
+  plot_layout(heights = c(2, 1))
+
+final_plot <- plot_grid(
   top,
-  feature_plot + theme(legend.position = 'right'),
-  nrow = 2,
-  rel_heights = c(0.4, 1.5),
-  labels = c('', 'C')
+  middleish,
+  results_plot,
+  align = 'v',
+  axis = 'r',
+  labels = c("", "D", "E"),
+  nrow = 3,
+  rel_heights = c(1.2, 1, 2)
 )
 
 save_plot(
-  here("Fig3", "plots", "Fig3.pdf"),
-  merge,
+  here(
+    "Fig3",
+    "plots",
+    "Fig3.pdf"
+  ),
+  final_plot,
   base_width = 7.5,
-  base_height = 7,
+  base_height = 9,
   device = cairo_pdf
 )
 
 save_plot(
-  here("Fig3", "plots", "Fig3.png"),
-  merge,
+  here(
+    "Fig3",
+    "plots",
+    "Fig3.png"
+  ),
+  final_plot,
   base_width = 7.5,
-  base_height = 7,
+  base_height = 9,
   bg = 'white'
 )

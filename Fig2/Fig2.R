@@ -10,347 +10,76 @@ usethis::use_air(vscode = TRUE)
 
 source(here("utils", "helper_functions.R"))
 
-# import ------------------------------------------------------------------
+# import and tidy ---------------------------------------------------------
 
-# 145 MB file of filtered tracking/coordinate data
-skinny_agar <- read_rds(here("Fig2", "data", "skinny_filtered.rds"))
-
-# tidy --------------------------------------------------------------------
-
-chunked_data <- skinny_agar |>
-  filter(!experiment %in% c("20241003a02rvh", "20241017a01rvh")) |>
-  group_by(date, experiment, well_row, well_col, particle) |>
-  arrange(frame, .by_group = TRUE) |>
-  group_split() |>
-  map_dfr(~ split_trajectory(.x, frame_rate = 8, chunk_duration_sec = 5))
-
-nest_cols <- c("date", "experiment", "well_row", "well_col", "particle")
-nested <- quick_nest(chunked_data, nest_cols)
-
-track_summary <- calculate_track_features_parallel(
-  nested,
-  fps = 8,
-  chunk_size = 500,
-  pixel_to_mm = 126.5
-)
-
-# write_rds(track_summary, here("Fig2", "data", "track_summary.rds"))
-track_summary <- read_rds("track_summary.rds")
-
-# slight downward slant in the background images, so true slant is upward
-# the split PNGs have a downward slant which means well_row 2 is the bottom, 1 is the middle, and 0 is the top
+# tracks with features extracted (see Fig1.R for details)
+track_summary <- read_rds(here("Fig1", "data", "double_track_summary.rds"))
 
 shifted <- track_summary |>
   unnest(c(data)) |>
+  group_by(date, video, experiment, particle) |>
+  arrange(frame, .by_group = TRUE) |>
+  group_by(date, video, experiment) |>
   mutate(
-    arena = str_extract(experiment, "a[0-9]{2}")
+    diffusion = case_when(
+      date %in% c("20240111", "20240328", "20240627", "20240718", '20240725') ~ "2 hr.",
+      date %in% c("20240808", "20240822", '20240829') ~ "1 hr."
+    ),
+    scw_type = case_when(
+      date %in% c("20240111", "20240328") ~ 'raw',
+      date %in%
+        c(
+          "20240627",
+          "20240718",
+          '20240725',
+          "20240808",
+          "20240822",
+          '20240829'
+        ) ~
+        "lyo"
+    )
   ) |>
   # filter out non-moving particles (false-positives)
   filter(
-    speed_mean > 632,
+    speed_mean > 5,
     net_displacement > 50,
-    sd_x > 5 & sd_y > 5,
-    net_displacement / path_length > 0.175
-  ) |>
-  mutate(
-    treatment = case_when(
-      arena == "a01" & well_row == 2 ~ "APW1",
-      arena == "a02" & well_row == 2 ~ "APW2",
-      arena == "a01" & well_row == 1 ~ "Bku",
-      arena == "a01" & well_row == 0 ~ "Bga",
-      arena == "a02" & well_row == 1 ~ "Bsu",
-      arena == "a02" & well_row == 0 ~ "Bst",
-    )
+    sd_x > 5 & sd_y > 5
   )
 
-###################################################
-################### PLOT TRACKS ###################
-###################################################
+apw_border <- min(shifted$x) + 3693
+scw_border <- min(shifted$x) + 7129 - 400
 
-(tracks1 <- shifted |>
-  filter(treatment %in% c('APW1', 'APW2', 'Bga')) |>
+border_crossers <- shifted |>
+  filter(diffusion == '2 hr.') |>
+  group_by(file, date, video, experiment, subparticle) |>
+  slice(1, n()) |>
+  select(file:particle, subparticle, x) |>
+  mutate(position = rep(c("start", "stop"))) |>
+  pivot_wider(names_from = position, values_from = x) |>
   mutate(
-    treatment = case_when(
-      str_detect(treatment, "APW") ~ "Control",
-      treatment == "Bga" ~ "*B. glabrata*"
-    ),
-    treatment = factor(
-      treatment,
-      levels = c(
-        "Control",
-        "*B. glabrata*"
-      )
+    category = case_when(
+      start > apw_border & stop < apw_border ~ "out_in_APW",
+      start < apw_border & stop > apw_border ~ "in_out_APW",
+      start < scw_border & stop > scw_border ~ "out_in_SCW",
+      start > scw_border & stop < scw_border ~ "in_out_SCW",
+      TRUE ~ NA_character_
     )
   ) |>
-  ggplot(aes(x = x, y = y, color = frame / 8 / 60)) +
-  geom_path(
-    aes(group = interaction(experiment, subparticle)),
-    linewidth = 0.25
-  ) +
-  geom_point(size = 0.5) +
-  facet_wrap(facets = vars(treatment), ncol = 2, scales = 'free_y') +
-  scale_color_viridis_c(option = 'mako') +
-  scale_x_continuous(
-    breaks = seq(min(shifted$x), max(shifted$x), length.out = 5),
-    expand = c(0, 0),
-    labels = c("0", "20.25", "40.5", "60.75", "81")
-  ) +
-  scale_y_continuous(
-    breaks = seq(min(shifted$y), max(shifted$y), length.out = 3),
-    expand = c(0, 0),
-    labels = c("", "", "")
-  ) +
-  labs(color = "Time\n(minutes)", x = ("X (mm)"), y = ("Y")) +
-  theme_minimal() +
-  theme(
-    legend.text = element_text(size = 8),
-    legend.title = element_text(size = 9),
-    strip.text.x = element_blank(),
-    axis.text.x = element_markdown(size = 8),
-    axis.text.y = element_markdown(size = 8),
-    axis.title = element_text(size = 9),
-    strip.background = element_blank()
-  ) +
-  NULL)
+  drop_na(category) |>
+  select(-start, -stop) |>
+  left_join(select(shifted, file:x, subparticle, frame))
 
-save_plot(
-  here("Fig2", "plots", "subplots", "Fig2B-bottom.pdf"),
-  tracks1,
-  base_width = 7.5,
-  base_height = 3.5,
-  device = cairo_pdf
-)
-
-(tracks2 <- shifted |>
-  filter(treatment %in% c('Bku', 'Bsu', 'Bst')) |>
-  mutate(
-    treatment = case_when(
-      treatment == "Bku" ~ "*B. kuhniana*",
-      treatment == "Bsu" ~ "*B. sudanica/<br>B. pfeifferi*",
-      treatment == "Bst" ~ "*B. straminea*",
-    ),
-    treatment = factor(
-      treatment,
-      levels = c(
-        "*B. sudanica/<br>B. pfeifferi*",
-        "*B. straminea*",
-        "*B. kuhniana*"
-      )
-    )
-  ) |>
-  ggplot(aes(x = x, y = y, color = frame / 8 / 60)) +
-  geom_path(
-    aes(group = interaction(experiment, subparticle)),
-    linewidth = 0.25
-  ) +
-  geom_point(size = 0.5) +
-  facet_wrap(facets = vars(treatment), ncol = 3, scales = 'free_y') +
-  scale_color_viridis_c(option = 'mako') +
-  scale_x_continuous(
-    breaks = seq(min(shifted$x), max(shifted$x), length.out = 5),
-    expand = c(0, 0),
-    labels = c("0", "20.25", "40.5", "60.75", "81")
-  ) +
-  scale_y_continuous(
-    breaks = seq(min(shifted$y), max(shifted$y), length.out = 3),
-    expand = c(0, 0),
-    labels = c("", "", "")
-  ) +
-  labs(color = "Time\n(minutes)", x = ("X (mm)"), y = ("Y")) +
-  theme_minimal() +
-  theme(
-    legend.position = "empty",
-    strip.text.x = element_blank(),
-    axis.text.x = element_markdown(size = 8),
-    axis.text.y = element_markdown(size = 8),
-    axis.title = element_text(size = 9),
-    strip.background = element_blank()
-  ) +
-  NULL)
-
-save_plot(
-  here("Fig2", "plots", "subplots", "Fig2D-bottom.pdf"),
-  tracks2,
-  base_width = 7.5,
-  base_height = 3.5,
-  device = cairo_pdf
-)
-
-
-########################################################
-################### PLOT STACKED BAR ###################
-########################################################
-
-bins <- shifted |>
-  ungroup() |>
-  mutate(
-    frame_bin = case_when(
-      frame < 4800 * 2 ~ "0-20 min.",
-      frame >= 4800 * 2 & frame < 4800 * 4 ~ "20-40 min.",
-      frame >= 4800 * 4 ~ "40-60 min.",
-    )
-  ) |>
-  # merge the APW treatment for plotting purposes
-  mutate(
-    treatment = case_when(
-      str_detect(treatment, "APW") ~ "Control",
-      treatment == "Bku" ~ "*B. kuhniana*",
-      treatment == "Bga" ~ "*B. glabrata*",
-      treatment == "Bsu" ~ "*B. sudanica/<br>B. pfeifferi*",
-      treatment == "Bst" ~ "*B. straminea*",
-    ),
-    treatment = factor(
-      treatment,
-      levels = c(
-        'Control',
-        "*B. glabrata*",
-        "*B. sudanica/<br>B. pfeifferi*",
-        "*B. straminea*",
-        "*B. kuhniana*"
-      )
-    )
-  ) |>
-  mutate(
-    x_bin = case_when(
-      x < -3000 ~ 'Start',
-      x > -3000 & x < 3000 ~ "Middle",
-      x > 3000 ~ 'Cue'
-    ),
-    x_bin = factor(
-      x_bin,
-      levels = c('Start', 'Middle', 'Cue')
-    ),
-    frame_bin = factor(
-      frame_bin,
-      levels = c('0-20 min.', '20-40 min.', "40-60 min.")
-    )
-  ) |>
-  group_by(treatment, frame_bin, x_bin) %>%
-  summarise(
-    n = n()
-  ) %>%
-  mutate(pct = n / sum(n) * 100)
-
-plot_stacked_bar <- function(df, cols = 2) {
-  ggplot(df) +
-    geom_col(aes(x = frame_bin, y = pct, fill = forcats::fct_rev(x_bin))) +
-    coord_flip() +
-    facet_wrap(~treatment, ncol = cols) +
-    labs(x = 'Time bins', y = "Percent tracks in region", fill = "Region") +
-    scale_fill_manual(values = rev(c("#FBDCE2", "#DA93C9", "#AE55BC"))) +
-    scale_x_discrete(limits = rev) +
-    scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
-    theme_half_open() +
-    theme(
-      legend.position = "bottom",
-      legend.text = element_text(size = 8),
-      legend.title = element_text(size = 9),
-      strip.text.x = element_markdown(size = 8),
-      axis.text.x = element_markdown(size = 8, hjust = 1),
-      axis.text.y = element_markdown(size = 8),
-      axis.title = element_text(size = 9),
-      strip.background = element_blank()
-    )
-}
-
-(stacked_bar_1 <- bins %>%
-  filter(treatment %in% c('Control', "*B. glabrata*")) |>
-  plot_stacked_bar())
-
-save_plot(
-  here("Fig2", "plots", "subplots", "Fig2B-top.pdf"),
-  stacked_bar_1,
-  base_width = 7.5,
-  base_height = 3.5,
-  device = cairo_pdf
-)
-
-(stacked_bar_2 <- bins %>%
-  filter(!treatment %in% c('Control', "*B. glabrata*")) |>
-  plot_stacked_bar(cols = 3))
-
-save_plot(
-  here("Fig2", "plots", "subplots", "Fig2D-top.pdf"),
-  stacked_bar_2,
-  base_width = 7.5,
-  base_height = 3.5,
-  device = cairo_pdf
-)
-
-######################################################
-################### CHUNK ANALYSIS ###################
-######################################################
-
-nest_cols <- c("date", "experiment", "well_row", "well_col", "subparticle")
-nested <- quick_nest(chunked_data, nest_cols)
-
-subtrack_summary <- calculate_track_features_parallel(
-  nested,
-  fps = 8,
-  chunk_size = 500,
-  pixel_to_mm = 126.5
-)
-
-# write_rds(subtrack_summary, here("Fig2", "data", "subtrack_summary.rds"))
-subtrack_summary <- read_rds("subtrack_summary.rds")
-
-subtrack_summary_region <- subtrack_summary |>
-  mutate(
-    response = ifelse(mean_x > 0, 'cue', 'control'),
-    arena = str_extract(experiment, "a[0-9]{2}"),
-    treatment = ifelse(
-      well_row == 2,
-      "Control",
-      ifelse(
-        arena == "a01" & well_row == 1,
-        "Bku",
-        ifelse(
-          arena == "a01" & well_row == 0,
-          "Bgl",
-          ifelse(
-            arena == "a02" & well_row == 1,
-            "Bsu",
-            ifelse(arena == "a02" & well_row == 0, "Bst", NA_character_)
-          )
-        )
-      )
-    ),
-    .before = data,
+border_crossers_features <- border_crossers |>
+  rename(response = category) |>
+  group_by(file, date, video, experiment, particle, subparticle, response) |>
+  group_nest() |>
+  calculate_track_features_parallel(
+    fps = 8,
+    pixel_to_mm = 126.5,
+    chunk_size = 50
   )
 
-feature_cols <- subtrack_summary_region %>%
-  ungroup() |>
-  select(-(date:sd_y)) %>%
-  select_if(is.numeric) %>%
-  names()
-
-source(here("utils", "model_utils.R"))
-
-bgl_results <- map_dfr(
-  feature_cols,
-  ~ fit_model(.x, subtrack_summary_region |> filter(treatment == 'Bgl'))
-) |>
-  mutate(treatment = 'Bgl', .before = term)
-
-bsu_results <- map_dfr(
-  feature_cols,
-  ~ fit_model(.x, subtrack_summary_region |> filter(treatment == 'Bsu'))
-) |>
-  mutate(treatment = 'Bsu', .before = term)
-
-bku_results <- map_dfr(
-  feature_cols,
-  ~ fit_model(.x, subtrack_summary_region |> filter(treatment == 'Bku'))
-) |>
-  mutate(treatment = 'Bku', .before = term)
-
-bst_results <- map_dfr(
-  feature_cols,
-  ~ fit_model(.x, subtrack_summary_region |> filter(treatment == 'Bst'))
-) |>
-  mutate(treatment = 'Bst', .before = term)
-
-feature_track_summary <- subtrack_summary_region |>
+border_crossers_features_summary <- border_crossers_features |>
   pivot_longer(
     cols = frame_start:curv_q90,
     names_to = "feature",
@@ -364,9 +93,34 @@ feature_track_summary <- subtrack_summary_region |>
     .groups = 'drop'
   )
 
-results <- bind_rows(bgl_results, bsu_results, bku_results, bst_results) |>
+feature_cols <- border_crossers_features %>%
+  ungroup() |>
+  select(-(file:sd_y)) %>%
+  select_if(is.numeric) %>%
+  names()
+
+source(here("utils", "model_utils.R"))
+
+out_in_results <- map_dfr(
+  feature_cols,
+  ~ fit_model(
+    .x,
+    border_crossers_features |> filter(str_detect(response, "^out_in"))
+  )
+) |>
+  mutate(p_adj = p.adjust(p.value, method = "fdr"))
+
+in_out_results <- map_dfr(
+  feature_cols,
+  ~ fit_model(
+    .x,
+    border_crossers_features |> filter(str_detect(response, "^in_out"))
+  )
+) |>
+  mutate(p_adj = p.adjust(p.value, method = "fdr"))
+
+border_crossers_results <- bind_rows(out_in_results, in_out_results) |>
   mutate(
-    p_adj = p.adjust(p.value, method = "fdr"),
     sig = case_when(
       p_adj < 0.0001 ~ "****",
       p_adj < 0.001 ~ "***",
@@ -375,18 +129,20 @@ results <- bind_rows(bgl_results, bsu_results, bku_results, bst_results) |>
       TRUE ~ ''
     )
   ) |>
-  left_join(feature_track_summary |> select(feature, sd)) |>
+  left_join(border_crossers_features_summary |> select(feature, sd)) |>
   mutate(
     cohens_d = estimate / sd,
     se_cohens_d = std.error / sd
   ) |>
-  arrange(desc(cohens_d))
+  arrange(desc(cohens_d)) |>
+  drop_na(p_adj)
 
-feature_order <- results |>
-  filter(str_detect(term, "cue")) |>
+feature_order <- border_crossers_results |>
+  drop_na(p_adj) |>
   group_by(feature) |>
   summarise(mean_cohens_d = mean(cohens_d, na.rm = TRUE), .groups = 'drop') |>
   arrange(mean_cohens_d) |>
+  drop_na() |>
   pull(feature)
 
 feature_labels <- c(
@@ -435,18 +191,18 @@ feature_labels <- c(
   "straightness" = "Straightness"
 )
 
-(results_plot <- results |>
-  drop_na() |>
+(border_crossers_cleveland <- border_crossers_results |>
+  drop_na(cohens_d) |>
   mutate(
-    feature = factor(feature, levels = names(feature_labels)),
-    point_shape = ifelse(p_adj < 0.05, 16, NA)
+    point_shape = ifelse(p_adj <= 0.05, "sig", NA),
+    feature = factor(feature, levels = feature_order),
   ) |>
   ggplot() +
   geom_rect(
     data = tibble(
       class = c('large', 'medium', 'small', 'medium', 'large'),
-      xmin = c(-0.88, -0.5, -0.2, 0.2, 0.5),
-      xmax = c(-0.5, -0.2, 0.2, 0.5, 0.6),
+      xmin = c(-1, -0.8, -0.5, 0.5, 0.8),
+      xmax = c(-0.8, -0.5, 0.5, 0.8, 1),
       ymin = -Inf,
       ymax = Inf
     ),
@@ -457,32 +213,34 @@ feature_labels <- c(
   geom_pointrange(aes(
     x = cohens_d,
     y = feature,
-    color = treatment,
-    shape = point_shape,
+    color = term,
     xmin = cohens_d - se_cohens_d,
-    xmax = cohens_d + se_cohens_d
+    xmax = cohens_d + se_cohens_d,
+    shape = point_shape
   )) +
   scale_x_continuous(
-    expand = expansion(mult = 0),
-    breaks = c(-0.8, -0.5, -0.2, 0, 0.2, 0.5)
+    limits = c(-1, 1),
+    expand = expansion(mult = c(0, 0)),
+    breaks = c(-0.8, -0.5, -0.2, 0, 0.2, 0.5, 0.8)
   ) +
   scale_y_discrete(labels = feature_labels) +
   scale_color_manual(
-    labels = c(
-      "*B. glabrata*",
-      "*B. kuhniana*",
-      "*B. straminea*",
-      "*B. sudanica/B. pfeifferi*"
-    ),
-    values = c("#EF476F", "#FFD166", "#06D6A0", "#118AB2")
+    values = c("darkorange", "purple"),
+    labels = c("In to out", "Out to in")
   ) +
-  scale_shape_identity() +
   scale_fill_manual(values = c('grey90', 'grey80', 'grey70')) +
-  labs(x = "Standardized effect size", y = "Feature", color = "Cue source") +
+  labs(
+    x = "Standardized effect size",
+    y = "Feature",
+    color = "Bording crossing direction"
+  ) +
+  guides(
+    shape = "none"
+  ) +
   theme_half_open() +
   theme(
     axis.text.x = element_markdown(size = 8),
-    axis.text.y = element_markdown(size = 6),
+    axis.text.y = element_markdown(size = 8),
     axis.title = element_text(size = 9),
     legend.title = element_text(size = 9),
     legend.text = element_markdown(size = 8),
@@ -491,93 +249,64 @@ feature_labels <- c(
   NULL)
 
 save_plot(
-  here("Fig2", "plots", "subplots", "Fig2E.pdf"),
-  results_plot,
-  base_width = 10,
-  base_height = 6,
-  device = cairo_pdf
+  here("Fig2", "plots", "subplots", 'Fig2B.pdf'),
+  border_crossers_cleveland,
+  base_width = 6,
+  base_height = 5
 )
 
+(border_crossers_plot <- border_crossers_features |>
+  filter(str_detect(response, "SCW")) |>
+  mutate(response = factor(response, levels = c("out_in_SCW", "in_out_SCW"))) |>
+  unnest(data) |>
+  ggplot() +
+  geom_path(
+    aes(x, y, color = angular_velocity_var, group = subparticle),
+    arrow = arrow(type = "closed", length = unit(0.05, "inches")),
+    linewidth = 0.5,
+    alpha = 0.75
+  ) +
+  geom_vline(xintercept = scw_border, linetype = "dashed", color = "white") +
+  scale_color_viridis_c(option = "mako") +
+  facet_wrap(
+    vars(response),
+    scale = 'free',
+    labeller = as_labeller(
+      c(
+        "out_in_SCW" = "Out to in - SCW",
+        "in_out_SCW" = "In to out - SCW"
+      )
+    )
+  ) +
+  labs(x = ("X (px)"), y = "Y (px)", color = "Angular velocity\nvariance") +
+  theme_half_open() +
+  theme(
+    axis.text.x = element_markdown(size = 8),
+    axis.text.y = element_markdown(size = 8),
+    axis.title = element_text(size = 9),
+    strip.text = element_text(size = 9),
+    legend.title = element_text(size = 9),
+    legend.text = element_text(size = 8),
+    legend.position = 'right'
+  ) +
+  NULL)
 
-######################################################
-################### FINAL PLOTTING ###################
-######################################################
-
-msa <- ggdraw() +
-  draw_image(magick::image_read_pdf(here(
-    "Fig2",
-    "plots",
-    "subplots",
-    "Fig2C.pdf"
-  )))
-
-model <- ggdraw() +
-  draw_image(magick::image_read_pdf(here(
-    "Fig2",
-    "plots",
-    "subplots",
-    "Fig2A.pdf"
-  )))
-
-library(patchwork)
-
-(top_right <- (stacked_bar_1 + theme(legend.position = 'right')) /
-  (tracks1 +
-    theme_void() +
-    theme(
-      axis.title.y = element_blank(),
-      strip.text.x = element_blank(),
-      legend.title = element_text(size = 9),
-      legend.text = element_text(size = 8),
-    )) +
-  plot_layout(heights = c(2, 1)))
-
-top_left <- plot_grid(model, msa, nrow = 2, labels = c("A", "C"), rel_heights = c(1, 1.5))
-
-top <- plot_grid(
-  top_left,
-  top_right,
-  nrow = 1,
-  labels = c("A", "B")
-)
-
-middleish <- (stacked_bar_2 + theme(legend.position = 'empty')) /
-  (tracks2 +
-    theme_void() +
-    theme(axis.title.y = element_blank(), legend.position = 'empty', strip.text.x = element_blank())) +
-  plot_layout(heights = c(2, 1))
-
-final_plot <- plot_grid(
-  top,
-  middleish,
-  results_plot,
-  align = 'v',
-  axis = 'r',
-  labels = c("", "D", "E"),
-  nrow = 3,
-  rel_heights = c(1.2, 1, 2)
+save_plot(
+  here("Fig2", "plots", "subplots", 'Fig2A.pdf'),
+  border_crossers_plot,
+  base_width = 6,
+  base_height = 5
 )
 
 save_plot(
-  here(
-    "Fig2",
-    "plots",
-    "Fig2.pdf"
+  here("Fig2", "plots", 'Fig2.pdf'),
+  plot_grid(
+    border_crossers_plot,
+    border_crossers_cleveland,
+    nrow = 2,
+    labels = c("A", "B"),
+    rel_heights = c(0.75, 1)
   ),
-  final_plot,
-  base_width = 7.5,
-  base_height = 9,
-  device = cairo_pdf
-)
-
-save_plot(
-  here(
-    "Fig2",
-    "plots",
-    "Fig2.png"
-  ),
-  final_plot,
-  base_width = 7.5,
-  base_height = 9,
-  bg = 'white'
+  base_width = 6,
+  base_height = 8
 )
