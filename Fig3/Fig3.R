@@ -108,9 +108,13 @@ shifted <- track_summary |>
     aes(group = interaction(experiment, subparticle)),
     linewidth = 0.25
   ) +
-  geom_point(size = 0.5) +
+  # geom_point(size = 0.5) +
   facet_wrap(facets = vars(treatment), ncol = 2, scales = 'free_y') +
-  scale_color_viridis_c(option = 'mako') +
+  scale_color_viridis_c(
+    option = 'mako',
+    breaks = c(10, 30, 50),
+    guide = guide_colorbar(barwidth = 0.5, barheight = 2)
+  ) +
   scale_x_continuous(
     breaks = seq(min(shifted$x), max(shifted$x), length.out = 5),
     expand = c(0, 0),
@@ -164,7 +168,7 @@ save_plot(
     aes(group = interaction(experiment, subparticle)),
     linewidth = 0.25
   ) +
-  geom_point(size = 0.5) +
+  # geom_point(size = 0.5) +
   facet_wrap(facets = vars(treatment), ncol = 3, scales = 'free_y') +
   scale_color_viridis_c(option = 'mako') +
   scale_x_continuous(
@@ -258,7 +262,13 @@ plot_stacked_bar <- function(df, cols = 2) {
     coord_flip() +
     facet_wrap(~treatment, ncol = cols) +
     labs(x = 'Time bins', y = "Percent tracks in region", fill = "Region") +
-    scale_fill_manual(values = rev(c("#FBDCE2", "#DA93C9", "#AE55BC"))) +
+    scale_fill_manual(
+      values = rev(c("#FBDCE2", "#DA93C9", "#AE55BC")),
+      guide = guide_legend(
+        keywidth = 0.5,
+        keyheight = 0.5
+      )
+    ) +
     scale_x_discrete(limits = rev) +
     scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
     theme_half_open() +
@@ -556,14 +566,15 @@ library(patchwork)
       legend.title = element_text(size = 9),
       legend.text = element_text(size = 8),
     )) +
-  plot_layout(heights = c(2, 1)))
+  plot_layout(heights = c(2, 1.25)))
 
-top_left <- plot_grid(model, msa, nrow = 2, labels = c("A", "C"), rel_heights = c(1, 1.5))
+top_left <- plot_grid(model, msa, nrow = 2, labels = c("A", "C"), rel_heights = c(1, 1))
 
 top <- plot_grid(
   top_left,
   top_right,
   nrow = 1,
+  rel_widths = c(1, 1.25),
   labels = c("A", "B")
 )
 
