@@ -3,6 +3,7 @@ library(here)
 library(tidymodels)
 library(ggtext)
 library(cowplot)
+library(patchwork)
 
 usethis::use_air(vscode = TRUE)
 
@@ -125,7 +126,7 @@ shifted <- track_summary |>
     expand = c(0, 0),
     labels = c("", "", "")
   ) +
-  labs(color = "Time\n(minutes)", x = ("X (mm)"), y = ("Y")) +
+  labs(color = "Minute", x = ("X (mm)"), y = ("Y")) +
   theme_minimal() +
   theme(
     legend.text = element_text(size = 8),
@@ -181,7 +182,7 @@ save_plot(
     expand = c(0, 0),
     labels = c("", "", "")
   ) +
-  labs(color = "Time\n(minutes)", x = ("X (mm)"), y = ("Y")) +
+  labs(color = "Minute", x = ("X (mm)"), y = ("Y")) +
   theme_minimal() +
   theme(
     legend.position = "empty",
@@ -279,6 +280,7 @@ plot_stacked_bar <- function(df, cols = 2) {
       strip.text.x = element_markdown(size = 8),
       axis.text.x = element_markdown(size = 8, hjust = 1),
       axis.text.y = element_markdown(size = 8),
+      axis.title.y = element_blank(),
       axis.title = element_text(size = 9),
       strip.background = element_blank()
     )
@@ -563,8 +565,6 @@ model <- ggdraw() +
     "subplots",
     "Fig3A.pdf"
   )))
-
-library(patchwork)
 
 (top_right <- (stacked_bar_1 + theme(legend.position = 'right')) /
   (tracks1 +
