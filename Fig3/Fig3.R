@@ -312,7 +312,7 @@ save_plot(
 ################### CHUNK ANALYSIS ###################
 ######################################################
 
-# nest_cols <- c("date", "experiment", "well_row", "well_col", "subparticle")
+# nest_cols <- c("date", "experiment", "well_row", "well_col", "particle", "subparticle")
 # nested <- quick_nest(chunked_data, nest_cols)
 
 # subtrack_summary <- calculate_track_features_parallel(
@@ -352,7 +352,9 @@ subtrack_summary_region <- subtrack_summary |>
       )
     ),
     .before = data,
-  )
+  ) |>
+  # rename to adhere to the expectations of fit_model() -->  "response + (1 | date/video/particle)"
+  rename(video = experiment)
 
 feature_cols <- subtrack_summary_region %>%
   ungroup() |>
@@ -418,12 +420,12 @@ results <- bind_rows(bgl_results, bsu_results, bku_results, bst_results) |>
   ) |>
   arrange(desc(cohens_d))
 
-feature_order <- results |>
-  filter(str_detect(term, "cue")) |>
-  group_by(feature) |>
-  summarise(mean_cohens_d = mean(cohens_d, na.rm = TRUE), .groups = 'drop') |>
-  arrange(mean_cohens_d) |>
-  pull(feature)
+lscw <- read_rds(here("Fig1", "data", "d2l_results.rds")) |>
+  mutate(treatment = 'lSCW') |>
+  drop_na(cohens_d)
+
+# plot the y-axis in the same order as Fig 1
+feature_order <- read_rds(here('Fig1', 'data', 'feature_order.rds'))
 
 feature_labels <- c(
   "directional_persistence" = "Directional persistence",
@@ -481,8 +483,8 @@ feature_labels <- c(
   geom_rect(
     data = tibble(
       class = c('large', 'medium', 'small', 'medium', 'large'),
-      xmin = c(-0.88, -0.5, -0.2, 0.2, 0.5),
-      xmax = c(-0.5, -0.2, 0.2, 0.5, 0.6),
+      xmin = c(-1, -0.5, -0.2, 0.2, 0.5),
+      xmax = c(-0.5, -0.2, 0.2, 0.5, 0.65),
       ymin = -Inf,
       ymax = Inf
     ),
@@ -490,6 +492,13 @@ feature_labels <- c(
     show.legend = FALSE
   ) +
   geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  geom_segment(
+    data = lscw,
+    aes(x = cohens_d - se_cohens_d, xend = cohens_d + se_cohens_d, y = feature),
+    alpha = 0.25,
+    linetype = '11',
+    linewidth = 1
+  ) +
   geom_pointrange(aes(
     x = cohens_d,
     y = feature,

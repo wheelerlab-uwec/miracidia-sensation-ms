@@ -504,12 +504,18 @@ results <- bind_rows(
   ) |>
   arrange(desc(cohens_d))
 
+results |>
+  filter(diffusion == '2 hr.', scw_type == 'lyo') |>
+  select(-diffusion, -scw_type) |>
+  write_rds(here('Fig1', 'data', 'd2l_results.rds'))
+
 feature_order <- results |>
   filter(str_detect(term, "cue")) |>
   group_by(feature) |>
   summarise(mean_cohens_d = mean(cohens_d, na.rm = TRUE), .groups = 'drop') |>
   arrange(mean_cohens_d) |>
-  pull(feature)
+  pull(feature) |>
+  write_rds(here('Fig1', 'data', 'feature_order.rds'))
 
 feature_labels <- c(
   "directional_persistence" = "Directional persistence",
