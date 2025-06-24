@@ -310,3 +310,17 @@ save_plot(
   base_width = 6,
   base_height = 8
 )
+
+save_plot(
+  here("Fig2", "plots", 'Fig2.png'),
+  plot_grid(
+    border_crossers_cleveland,
+    border_crossers_plot,
+    nrow = 2,
+    labels = c("A", "B"),
+    rel_heights = c(1, 0.75)
+  ),
+  base_width = 6,
+  base_height = 8,
+  bg = 'white'
+)

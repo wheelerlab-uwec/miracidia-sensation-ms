@@ -98,3 +98,18 @@ save_plot(
   base_width = 6,
   base_height = 6
 )
+
+save_plot(
+  here("Fig5", "plots", "Fig5.png"),
+  plot_grid(
+    model,
+    plot,
+    nrow = 2,
+    rel_heights = c(1, 1),
+    labels = c('A', 'B'),
+    label_y = 1.01
+  ),
+  base_width = 6,
+  base_height = 6,
+  bg = 'white'
+)
