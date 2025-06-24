@@ -575,7 +575,7 @@ model <- ggdraw() +
       legend.title = element_text(size = 9),
       legend.text = element_text(size = 8),
     )) +
-  plot_layout(heights = c(2, 1.25)))
+  plot_layout(heights = c(3, 1)))
 
 top_left <- plot_grid(model, msa, nrow = 2, labels = c("A", "C"), rel_heights = c(1, 1))
 

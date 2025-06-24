@@ -66,4 +66,35 @@ labels <- c(
   ) +
   NULL)
 
-save_plot(here("Fig5", "plots", "Fig5.pdf"), plot, base_width = 6, base_height = 3)
+save_plot(
+  here("Fig5", "plots", "subplots", "Fig5B.pdf"),
+  plot,
+  base_width = 6,
+  base_height = 3
+)
+
+######################################################
+################### FINAL PLOTTING ###################
+######################################################
+
+model <- ggdraw() +
+  draw_image(magick::image_read_pdf(here(
+    "Fig5",
+    "plots",
+    "subplots",
+    "Fig5A.pdf"
+  )))
+
+save_plot(
+  here("Fig5", "plots", "Fig5.pdf"),
+  plot_grid(
+    model,
+    plot,
+    nrow = 2,
+    rel_heights = c(1, 1),
+    labels = c('A', 'B'),
+    label_y = 1.01
+  ),
+  base_width = 6,
+  base_height = 6
+)
