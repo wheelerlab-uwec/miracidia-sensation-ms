@@ -249,7 +249,7 @@ feature_labels <- c(
   NULL)
 
 save_plot(
-  here("Fig2", "plots", "subplots", 'Fig2B.pdf'),
+  here("Fig2", "plots", "subplots", 'Fig2A.pdf'),
   border_crossers_cleveland,
   base_width = 6,
   base_height = 5
@@ -292,7 +292,7 @@ save_plot(
   NULL)
 
 save_plot(
-  here("Fig2", "plots", "subplots", 'Fig2A.pdf'),
+  here("Fig2", "plots", "subplots", 'Fig2B.pdf'),
   border_crossers_plot,
   base_width = 6,
   base_height = 5
@@ -301,11 +301,11 @@ save_plot(
 save_plot(
   here("Fig2", "plots", 'Fig2.pdf'),
   plot_grid(
-    border_crossers_plot,
     border_crossers_cleveland,
+    border_crossers_plot,
     nrow = 2,
     labels = c("A", "B"),
-    rel_heights = c(0.75, 1)
+    rel_heights = c(1, 0.75)
   ),
   base_width = 6,
   base_height = 8

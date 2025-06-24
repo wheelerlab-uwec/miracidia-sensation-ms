@@ -15,7 +15,7 @@ df <- read_csv(here("Fig5", "data", "penetration_data.csv")) %>%
   ) %>%
   mutate() %>%
   #filtering out preliminary data - didn't actually have pre-infection counts
-  filter(experiment_date != '20250213')
+  filter(experiment_date != '20250213', before != 10, )
 
 
 summary <- df %>%
