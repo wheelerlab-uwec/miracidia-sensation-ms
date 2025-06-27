@@ -5,7 +5,8 @@ library(ggtext)
 
 # functions ---------------------------------------------------------------
 
-source(here("../../invision/double_agar/helper_functions.R"))
+source(here("utils", "helper_functions.R"))
+source(here("Fig4", "model_utils.R"))
 
 # import ------------------------------------------------------------------
 
@@ -426,14 +427,14 @@ supp_features <- results |>
 
 
 save_plot(
-  here("Fig4", "plots", "S3_Fig.pdf"),
+  here("Fig4", "plots", "S2_Fig.pdf"),
   supp_features,
   base_width = 6,
   base_height = 6
 )
 
 save_plot(
-  here("Fig4", "plots", "S3_Fig.png"),
+  here("Fig4", "plots", "S2_Fig.png"),
   supp_features,
   base_width = 7.5,
   base_height = 7.5,
@@ -475,3 +476,160 @@ save_plot(
   base_height = 7,
   bg = 'white'
 )
+
+# droplets ---------------------------------------------------------------
+
+droplet_subtrack_summary <- read_rds(here("Fig4", "data", "droplet_subtrack_summary.rds")) |>
+  mutate(
+    plate_number = str_extract(plate, "p[0-9]{2}"),
+    treatment = case_when(
+      str_detect(well, '^A') ~ 'APW',
+      str_detect(well, '^B') ~ 'SCW',
+      str_detect(well, '^C') ~ 'Mg'
+    ),
+    timepoint = case_when(
+      plate_number == 'p01' ~ "Before",
+      plate_number == 'p02' ~ "After",
+    )
+  ) |>
+  ungroup() |>
+  filter(timepoint == 'After') |>
+  rename(date = experiment_date)
+
+
+feature_cols <- droplet_subtrack_summary %>%
+  ungroup() |>
+  select(-(file:sd_y)) %>%
+  select_if(is.numeric) %>%
+  names()
+
+results <- map_dfr(
+  feature_cols,
+  ~ fit_model_droplet(
+    .x,
+    droplet_subtrack_summary
+  )
+) |>
+  mutate(p_adj = p.adjust(p.value, method = "fdr"))
+
+feature_summary <- droplet_subtrack_summary |>
+  pivot_longer(
+    cols = frame_start:curv_q90,
+    names_to = "feature",
+    values_to = "value"
+  ) |>
+  group_by(treatment, feature) |>
+  summarise(
+    mean = mean(value, na.rm = TRUE),
+    sd = sd(value, na.rm = TRUE),
+    n = n(),
+    .groups = 'drop'
+  )
+
+results_prep <- results |>
+  mutate(
+    sig = case_when(
+      p_adj < 0.0001 ~ "****",
+      p_adj < 0.001 ~ "***",
+      p_adj < 0.01 ~ "**",
+      p_adj < 0.05 ~ "*",
+      TRUE ~ ''
+    ),
+    treatment = str_remove(term, "treatment"),
+  ) |>
+  left_join(feature_summary |> select(treatment, feature, sd)) |>
+  mutate(
+    cohens_d = estimate / sd,
+    se_cohens_d = std.error / sd
+  ) |>
+  arrange(desc(cohens_d))
+
+feature_order <- results_prep |>
+  group_by(feature) |>
+  summarise(mean_cohens_d = mean(cohens_d, na.rm = TRUE), .groups = 'drop') |>
+  arrange(mean_cohens_d) |>
+  pull(feature)
+
+feature_labels <- c(
+  "directional_persistence" = "Directional persistence",
+  "heading_autocorr" = "Heading autocorrelation",
+  "angvel_q10" = "Angular velocity (10th percentile)",
+  "accel_q10" = "Acceleration (10th percentile)",
+  "angacc_q10" = "Angular acceleration (10th percentile)",
+  "convex_hull_area" = "Convex hull area",
+  "speed_autocorr" = "Speed autocorrelation",
+  "net_displacement" = "Net displacement",
+  "angvel_q50" = "Angular velocity (50th percentile)",
+  "speed_q10" = "Speed (10th percentile)",
+  "angacc_q50" = "Angular acceleration (50th percentile)",
+  "movement_efficiency" = "Movement efficiency",
+  "angular_acceleration_mean" = "Mean angular acceleration",
+  "jerk_mean" = "Mean jerk",
+  "radius_of_gyration" = "Radius of gyration",
+  "acceleration_mean" = "Mean acceleration",
+  "bbox_aspect_ratio" = "Bounding box aspect ratio",
+  "angular_velocity_mean" = "Mean angular velocity",
+  "turning_bias" = "Turning bias",
+  "accel_q50" = "Acceleration (50th percentile)",
+  "mean_heading" = "Mean heading",
+  "speed_mean" = "Mean speed",
+  "speed_q50" = "Speed (50th percentile)",
+  "curv_q10" = "Curvature (10th percentile)",
+  "path_length" = "Path length",
+  "curv_q50" = "Curvature (50th percentile)",
+  "fractal_dimension" = "Fractal dimension",
+  "mean_curvature" = "Mean curvature",
+  "curv_q90" = "Curvature (90th percentile)",
+  "speed_q90" = "Speed (90th percentile)",
+  "speed_var" = "Speed variance",
+  "acceleration_var" = "Acceleration variance",
+  "sinuosity" = "Sinuosity",
+  "tortuosity" = "Tortuosity",
+  "angular_velocity_var" = "Angular velocity variance",
+  "angacc_q90" = "Angular acceleration (90th percentile)",
+  "total_turn" = "Total turn",
+  "angvel_q90" = "Angular velocity (90th percentile)",
+  "accel_q90" = "Acceleration (90th percentile)",
+  "heading_variance" = "Heading variance",
+  "max_dist_from_start" = "Max distance from start",
+  "speed_max" = "Max speed",
+  "straightness" = "Straightness"
+)
+
+(results_plot <- results_prep |>
+  mutate(
+    treatment = case_when(
+      treatment == 'Mg' ~ 'Mg<sub>2+</sub>',
+      TRUE ~ treatment
+    ),
+    feature = factor(feature, levels = feature_order),
+  ) |>
+  drop_na() |>
+  ggplot() +
+  geom_tile(aes(x = treatment, y = feature, fill = cohens_d)) +
+  geom_text(
+    aes(x = treatment, y = feature, label = sig),
+    color = "grey10",
+    size = 1.5,
+    vjust = 0.5
+  ) +
+  scale_x_discrete(expand = expansion(mult = c(0, 0))) +
+  scale_y_discrete(labels = feature_labels) +
+  scale_fill_distiller(
+    limits = c(-1, 1),
+    palette = "BrBG"
+  ) +
+  labs(fill = "Standardized<br>effect size", y = "Feature", x = "Treatment") +
+  theme_half_open() +
+  theme(
+    axis.text.x = element_markdown(size = 8),
+    axis.text.y = element_markdown(size = 8),
+    axis.title = element_text(size = 9),
+    strip.text = element_markdown(size = 9),
+    legend.title = element_markdown(size = 9),
+    legend.text = element_text(size = 8),
+    legend.position = 'right'
+  ) +
+  NULL)
+
+save_plot(here("Fig4", "plots", "S3_Fig.pdf"), results_plot, base_width = 5, base_height = 6)
