@@ -478,7 +478,7 @@ feature_labels <- c(
 (results_plot <- results |>
   drop_na() |>
   mutate(
-    feature = factor(feature, levels = names(feature_labels)),
+    feature = factor(feature, levels = feature_order),
     point_shape = ifelse(p_adj < 0.05, 16, NA)
   ) |>
   ggplot() +

@@ -13,6 +13,8 @@ source(here("utils", "helper_functions.R"))
 # import and tidy ---------------------------------------------------------
 
 # tracks with features extracted (see Fig1.R for details)
+zen4R::download_zenodo("10.5281/zenodo.15713500", path = here("Fig1", "data"), files = 'double_track_summary.rds')
+
 track_summary <- read_rds(here("Fig1", "data", "double_track_summary.rds"))
 
 shifted <- track_summary |>
@@ -137,13 +139,7 @@ border_crossers_results <- bind_rows(out_in_results, in_out_results) |>
   arrange(desc(cohens_d)) |>
   drop_na(p_adj)
 
-feature_order <- border_crossers_results |>
-  drop_na(p_adj) |>
-  group_by(feature) |>
-  summarise(mean_cohens_d = mean(cohens_d, na.rm = TRUE), .groups = 'drop') |>
-  arrange(mean_cohens_d) |>
-  drop_na() |>
-  pull(feature)
+feature_order <- read_rds(here("Fig1", "data", "feature_order.rds"))
 
 feature_labels <- c(
   "directional_persistence" = "Directional persistence",
@@ -228,7 +224,7 @@ feature_labels <- c(
     values = c("darkorange", "purple"),
     labels = c("In to out", "Out to in")
   ) +
-  scale_fill_manual(values = c('grey90', 'grey80', 'grey70')) +
+  scale_fill_manual(values = c('grey70', 'grey80', 'grey90')) +
   labs(
     x = "Standardized effect size",
     y = "Feature",

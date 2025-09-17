@@ -390,21 +390,22 @@ save_plot(
 #########################################################
 
 # NOTE: can skip this and read the summary in line 416
-nest_cols <- c("file", "date", "video", "experiment", "particle", "subparticle")
+# nest_cols <- c("file", "date", "video", "experiment", "particle", "subparticle")
 
-chunked_nested <- quick_nest(
-  shifted |> select(-(frame_start:curv_q90)),
-  nest_cols
-)
+# chunked_nested <- quick_nest(
+#   shifted |> select(-(frame_start:curv_q90)),
+#   nest_cols
+# )
 
-# calculate features for the track chunks
-subtrack_summary <- calculate_track_features_parallel(
-  chunked_nested,
-  fps = 8,
-  chunk_size = 500,
-  pixel_to_mm = 126.5
-)
+# # calculate features for the track chunks
+# subtrack_summary <- calculate_track_features_parallel(
+#   chunked_nested,
+#   fps = 8,
+#   chunk_size = 500,
+#   pixel_to_mm = 126.5
+# )
 
+# NOTE: start here
 zen4R::download_zenodo("10.5281/zenodo.15713500", path = here("Fig1", "data"), files = 'double_subtrack_summary.rds')
 
 subtrack_summary <- read_rds(here("Fig1", "data", 'double_subtrack_summary.rds')) |>

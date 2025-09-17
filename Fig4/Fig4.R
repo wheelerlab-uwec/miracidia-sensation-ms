@@ -354,8 +354,8 @@ feature_labels <- c(
   geom_text(
     aes(x = treatment, y = feature, label = sig),
     color = "grey10",
-    size = 1.5,
-    vjust = 0.5
+    size = 4,
+    vjust = 0.75
   ) +
   facet_wrap(vars(timepoint), nrow = 1) +
   scale_y_discrete(labels = feature_labels) +

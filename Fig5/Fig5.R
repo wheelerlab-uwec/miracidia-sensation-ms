@@ -1,5 +1,6 @@
 library(here)
 library(tidyverse)
+library(multcomp)
 library(cowplot)
 library(ggtext)
 
@@ -39,24 +40,55 @@ labels <- c(
     width='150' /><br>*B. kuhniana*"
 )
 
+df$treatment <- relevel(df$treatment, ref = 'Water')
+
+model <- lm(percent ~ treatment, data = df)
+dt <- glht(model, linfct = mcp(treatment = "Dunnett")) |>
+  broom::tidy() |>
+  mutate(
+    treatment = str_remove(contrast, ' - Water'),
+    sig = case_when(
+      adj.p.value < 0.0001 ~ '****',
+      adj.p.value < 0.001 ~ '***',
+      adj.p.value < 0.01 ~ '**',
+      adj.p.value < 0.05 ~ '*',
+      TRUE ~ 'ns'
+    )
+  )
+
 (plot <- df %>%
   ggplot(aes(x = treatment, y = percent)) +
-  geom_bar(stat = "summary", fun = "mean") +
+  # geom_bar(stat = "summary", fun = "mean") +
+  geom_boxplot(
+    outlier.shape = NA,
+    fill = 'lightgrey',
+    color = 'grey30',
+    alpha = 0.7,
+    width = 0.6
+  ) +
   ggbeeswarm::geom_quasirandom(size = 2, shape = 21, color = 'white', fill = 'steelblue') +
-  stat_summary(fun.data = "mean_cl_normal", color = 'indianred') +
-  ggpubr::stat_compare_means(
-    comparisons = comparisons,
-    label = 'p.signif',
-    method = 't.test',
-    tip.length = 0,
-    size = 2
+  # stat_summary(fun.data = "mean_cl_normal", color = 'indianred') +
+  geom_text(
+    data = dt,
+    aes(
+      x = treatment,
+      y = 1.05,
+      label = sig
+    ),
+    inherit.aes = FALSE,
+    size = 4,
+    color = 'black'
   ) +
   scale_x_discrete(
     name = NULL,
     labels = labels
   ) +
-  scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
-  labs(x = '', y = 'Fraction successfully penetrating') +
+  scale_y_continuous(
+    limits = c(0.1, 1.1),
+    expand = expansion(mult = c(0, 0.05)),
+    breaks = c(0.2, 0.4, 0.6, 0.8, 1.0),
+  ) +
+  labs(x = '', y = 'Portion successfully penetrating') +
   coord_flip() +
   theme_cowplot() +
   theme(
