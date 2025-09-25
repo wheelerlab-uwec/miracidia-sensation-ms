@@ -14,7 +14,7 @@ source(here("utils", "helper_functions.R"))
 
 # 4.75 GB file of raw tracking/coordinate data
 # NOTE: can skip this and read the summary in line 54 or uncomment and run to see raw tracks
-# zen4R::download_zenodo("10.5281/zenodo.15713500", path = here("Fig1", "data"), files = 'double_agar.rds')
+zen4R::download_zenodo("10.5281/zenodo.15713500", path = here("Fig1", "data"), files = 'double_agar.rds')
 
 # double_agar <- read_rds(here(
 #   "Fig1",
@@ -619,7 +619,7 @@ feature_labels <- c(
     values = c(16, 17),
     labels = c("Lyophilized", "Raw"),
   ) +
-  scale_fill_manual(values = c('grey90', 'grey80')) +
+  scale_fill_manual(values = rev(c('grey90', 'grey80'))) +
   labs(
     x = "Standardized effect size",
     y = "Feature",
