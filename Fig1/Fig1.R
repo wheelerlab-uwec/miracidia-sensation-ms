@@ -551,7 +551,7 @@ feature_labels <- c(
   "speed_q90" = "Speed (90th percentile)",
   "speed_var" = "Speed variance",
   "acceleration_var" = "Acceleration variance",
-  "sinuosity" = "Sinuosity",
+  # "sinuosity" = "Sinuosity",
   "tortuosity" = "Tortuosity",
   "angular_velocity_var" = "Angular velocity variance",
   "angacc_q90" = "Angular acceleration (90th percentile)",
@@ -565,7 +565,11 @@ feature_labels <- c(
 )
 
 (results_plot <- results |>
-  filter(str_detect(term, "cue")) |>
+  filter(
+    str_detect(term, "cue"),
+    # remove duplicate feature
+    feature != 'sinuosity'
+  ) |>
   drop_na() |>
   mutate(
     feature = factor(feature, levels = feature_order),

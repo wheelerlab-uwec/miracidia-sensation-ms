@@ -174,7 +174,7 @@ feature_labels <- c(
   "speed_q90" = "Speed (90th percentile)",
   "speed_var" = "Speed variance",
   "acceleration_var" = "Acceleration variance",
-  "sinuosity" = "Sinuosity",
+  # "sinuosity" = "Sinuosity",
   "tortuosity" = "Tortuosity",
   "angular_velocity_var" = "Angular velocity variance",
   "angacc_q90" = "Angular acceleration (90th percentile)",
@@ -189,6 +189,8 @@ feature_labels <- c(
 
 (border_crossers_cleveland <- border_crossers_results |>
   drop_na(cohens_d) |>
+  # remove duplicate feature
+  filter(feature != 'sinuosity') |>
   mutate(
     point_shape = ifelse(p_adj <= 0.05, "sig", NA),
     feature = factor(feature, levels = feature_order),

@@ -183,7 +183,6 @@ ex_plot <- track_prep |>
     # legend.text = element_text(angle = 45, hjust = 1),
     strip.text = element_blank()
   )
-ex_plot
 
 # subtrack analysis ----------------------------------------------------
 
@@ -314,7 +313,7 @@ feature_labels <- c(
   "speed_q90" = "Speed (90th percentile)",
   "speed_var" = "Speed variance",
   "acceleration_var" = "Acceleration variance",
-  "sinuosity" = "Sinuosity",
+  # "sinuosity" = "Sinuosity",
   "tortuosity" = "Tortuosity",
   "angular_velocity_var" = "Angular velocity variance",
   "angacc_q90" = "Angular acceleration (90th percentile)",
@@ -329,7 +328,12 @@ feature_labels <- c(
 
 (feature_plot <- results |>
   drop_na() |>
-  filter(timepoint %in% c("30 min", "60 min")) |>
+  filter(
+    timepoint %in% c("30 min", "60 min"),
+    # remove duplicate feature
+    feature != 'sinuosity'
+  ) |>
+
   mutate(
     treatment = factor(
       treatment,
@@ -544,65 +548,16 @@ results_prep <- results |>
   ) |>
   arrange(desc(cohens_d))
 
-feature_order <- results_prep |>
-  group_by(feature) |>
-  summarise(mean_cohens_d = mean(cohens_d, na.rm = TRUE), .groups = 'drop') |>
-  arrange(mean_cohens_d) |>
-  pull(feature)
-
-feature_labels <- c(
-  "directional_persistence" = "Directional persistence",
-  "heading_autocorr" = "Heading autocorrelation",
-  "angvel_q10" = "Angular velocity (10th percentile)",
-  "accel_q10" = "Acceleration (10th percentile)",
-  "angacc_q10" = "Angular acceleration (10th percentile)",
-  "convex_hull_area" = "Convex hull area",
-  "speed_autocorr" = "Speed autocorrelation",
-  "net_displacement" = "Net displacement",
-  "angvel_q50" = "Angular velocity (50th percentile)",
-  "speed_q10" = "Speed (10th percentile)",
-  "angacc_q50" = "Angular acceleration (50th percentile)",
-  "movement_efficiency" = "Movement efficiency",
-  "angular_acceleration_mean" = "Mean angular acceleration",
-  "jerk_mean" = "Mean jerk",
-  "radius_of_gyration" = "Radius of gyration",
-  "acceleration_mean" = "Mean acceleration",
-  "bbox_aspect_ratio" = "Bounding box aspect ratio",
-  "angular_velocity_mean" = "Mean angular velocity",
-  "turning_bias" = "Turning bias",
-  "accel_q50" = "Acceleration (50th percentile)",
-  "mean_heading" = "Mean heading",
-  "speed_mean" = "Mean speed",
-  "speed_q50" = "Speed (50th percentile)",
-  "curv_q10" = "Curvature (10th percentile)",
-  "path_length" = "Path length",
-  "curv_q50" = "Curvature (50th percentile)",
-  "fractal_dimension" = "Fractal dimension",
-  "mean_curvature" = "Mean curvature",
-  "curv_q90" = "Curvature (90th percentile)",
-  "speed_q90" = "Speed (90th percentile)",
-  "speed_var" = "Speed variance",
-  "acceleration_var" = "Acceleration variance",
-  "sinuosity" = "Sinuosity",
-  "tortuosity" = "Tortuosity",
-  "angular_velocity_var" = "Angular velocity variance",
-  "angacc_q90" = "Angular acceleration (90th percentile)",
-  "total_turn" = "Total turn",
-  "angvel_q90" = "Angular velocity (90th percentile)",
-  "accel_q90" = "Acceleration (90th percentile)",
-  "heading_variance" = "Heading variance",
-  "max_dist_from_start" = "Max distance from start",
-  "speed_max" = "Max speed",
-  "straightness" = "Straightness"
-)
-
 (results_plot <- results_prep |>
+  # remove duplicate feature
+  filter(
+    feature != 'sinuosity'
+  ) |>
   mutate(
     treatment = case_when(
       treatment == 'Mg' ~ 'Mg<sub>2+</sub>',
       TRUE ~ treatment
-    ),
-    feature = factor(feature, levels = feature_order),
+    )
   ) |>
   drop_na() |>
   ggplot() +

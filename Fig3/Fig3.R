@@ -462,7 +462,7 @@ feature_labels <- c(
   "speed_q90" = "Speed (90th percentile)",
   "speed_var" = "Speed variance",
   "acceleration_var" = "Acceleration variance",
-  "sinuosity" = "Sinuosity",
+  # "sinuosity" = "Sinuosity",
   "tortuosity" = "Tortuosity",
   "angular_velocity_var" = "Angular velocity variance",
   "angacc_q90" = "Angular acceleration (90th percentile)",
@@ -481,6 +481,8 @@ feature_labels <- c(
     feature = factor(feature, levels = feature_order),
     point_shape = ifelse(p_adj < 0.05, 16, NA)
   ) |>
+  # remove duplicate feature
+  filter(feature != 'sinuosity') |>
   ggplot() +
   geom_rect(
     data = tibble(
@@ -495,7 +497,7 @@ feature_labels <- c(
   ) +
   geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
   geom_segment(
-    data = lscw,
+    data = lscw |> filter(feature != 'sinuosity'),
     aes(x = cohens_d - se_cohens_d, xend = cohens_d + se_cohens_d, y = feature),
     alpha = 0.25,
     linetype = '11',
@@ -524,7 +526,7 @@ feature_labels <- c(
     values = c("#EF476F", "#FFD166", "#06D6A0", "#118AB2")
   ) +
   scale_shape_identity() +
-  scale_fill_manual(values = c('grey90', 'grey80', 'grey70')) +
+  scale_fill_manual(values = rev(c('grey90', 'grey80', 'grey70'))) +
   labs(x = "Standardized effect size", y = "Feature", color = "Cue source") +
   theme_half_open() +
   theme(
