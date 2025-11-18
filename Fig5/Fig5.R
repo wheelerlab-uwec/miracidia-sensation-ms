@@ -28,18 +28,6 @@ summary <- df %>%
 
 comparisons <- list(c('Water', 'Bgla'), c('Water', 'Bsud'), c('Water', 'Bstr'), c('Water', 'Bkun'))
 
-labels <- c(
-  Water = "Water",
-  Bgla = "<img src='https://i.postimg.cc/B6ZpnzxZ/Screenshot-2025-06-05-at-3-39-25-PM.png'
-    width='150' /><br>*B. glabrata*",
-  Bsud = "<img src='https://i.postimg.cc/Px7FYNRN/Screenshot-2025-04-03-at-8-43-15-PM.png'
-    width='150' /><br>*B. sudanica*<br>*B. pfeifferi*",
-  Bstr = "<img src='https://i.postimg.cc/FsNnctPy/Screenshot-2025-04-03-at-8-44-31-PM.png'
-    width='150' /><br>*B. straminea*",
-  Bkun = "<img src='https://i.postimg.cc/jjH7y13f/Screenshot-2025-04-03-at-8-45-28-PM.png'
-    width='150' /><br>*B. kuhniana*"
-)
-
 df$treatment <- relevel(df$treatment, ref = 'Water')
 
 model <- lm(percent ~ treatment, data = df)
@@ -55,6 +43,23 @@ dt <- glht(model, linfct = mcp(treatment = "Dunnett")) |>
       TRUE ~ 'ns'
     )
   )
+
+plot_grid(
+  ggpubr::ggqqplot(residuals(model)) + ggtitle("QQ Plot of Residuals")
+)
+
+labels <- c(
+  Water = "Water",
+  Bgla = "<img src='https://i.postimg.cc/B6ZpnzxZ/Screenshot-2025-06-05-at-3-39-25-PM.png'
+    width='150' /><br>*B. glabrata*",
+  Bsud = "<img src='https://i.postimg.cc/Px7FYNRN/Screenshot-2025-04-03-at-8-43-15-PM.png'
+    width='150' /><br>*B. sudanica*<br>*B. pfeifferi*",
+  Bstr = "<img src='https://i.postimg.cc/FsNnctPy/Screenshot-2025-04-03-at-8-44-31-PM.png'
+    width='150' /><br>*B. straminea*",
+  Bkun = "<img src='https://i.postimg.cc/jjH7y13f/Screenshot-2025-04-03-at-8-45-28-PM.png'
+    width='150' /><br>*B. kuhniana*"
+)
+
 
 (plot <- df %>%
   ggplot(aes(x = treatment, y = percent)) +
@@ -84,11 +89,11 @@ dt <- glht(model, linfct = mcp(treatment = "Dunnett")) |>
     labels = labels
   ) +
   scale_y_continuous(
-    limits = c(0.1, 1.1),
+    limits = c(0, 1.1),
     expand = expansion(mult = c(0, 0.05)),
-    breaks = c(0.2, 0.4, 0.6, 0.8, 1.0),
+    breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1.0),
   ) +
-  labs(x = '', y = 'Portion successfully penetrating') +
+  labs(x = '', y = '1 - (proportion of miracidia remaining in well)') +
   coord_flip() +
   theme_cowplot() +
   theme(
