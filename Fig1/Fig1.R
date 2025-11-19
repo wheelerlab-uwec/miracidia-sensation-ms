@@ -6,6 +6,9 @@ library(cowplot)
 
 usethis::use_air(vscode = TRUE)
 
+conflicted::conflict_prefer('select', 'dplyr')
+conflicted::conflicts_prefer(dplyr::filter)
+
 # functions ---------------------------------------------------------------
 
 source(here("utils", "helper_functions.R"))
@@ -440,10 +443,10 @@ subtrack_summary <- read_rds(here("Fig1", "data", 'double_subtrack_summary.rds')
 
 source(here("utils", "model_utils.R"))
 
-feature_cols <- subtrack_summary %>%
+feature_cols <- subtrack_summary |>
   ungroup() |>
-  select(-(file:sd_y)) %>%
-  select_if(is.numeric) %>%
+  dplyr::select(-(file:sd_y)) |>
+  select_if(is.numeric) |>
   names()
 
 d1_results <- map_dfr(
@@ -623,7 +626,7 @@ feature_labels <- c(
     values = c(16, 17),
     labels = c("Lyophilized", "Raw"),
   ) +
-  scale_fill_manual(values = c('grey90', 'grey80')) +
+  scale_fill_manual(values = rev(c('grey90', 'grey80'))) +
   labs(
     x = "Standardized effect size",
     y = "Feature",
